@@ -4,13 +4,10 @@ import ROOT as r
 import scipy.special
 from scipy.stats import norm
 from scipy.stats import poisson
+from scipy.optimize import minimize
+from scipy.optimize import bisect 
 
 from WIMpy import DMUtils as DMU
-#from lindhard import *
-from lindhard import lindhard_transform 
-from differential_rate import *
-from simulate_events import *
-from likelihood import *
 from differential_rate_electronDM import *
 
 
@@ -88,21 +85,22 @@ class dm_event(object):
             bkg_pars contains the dark current.
         """
         self.noise = kwargs["noise"] if "noise" in kwargs else self.noise
-        xmin = kwargs["xmin"] if "xmin" in kwargs else self.xmin
-        xmax = kwargs["xmax"] if "xmax" in kwargs else self.xmax
+        #xmin = kwargs["xmin"] if "xmin" in kwargs else self.xmin
+        #xmax = kwargs["xmax"] if "xmax" in kwargs else self.xmax
 
         if bkg_pars:
             #### Add background events
-            lamb = bkg_pars*self.t_exp 
             self.simul_bkg(bkg_pars)
             self.simul_dm()
             self.events = self.signal_ev + self.bkg_ev
             ### Add readout noise
             self.events = self.events + np.random.normal(0,self.noise, self.npix)
             self.events = self.events.tolist()
+            """
             plt.hist(self.events, bins=int((self.xmax-self.xmin)/0.1))
             plt.yscale("log")
             plt.show()
+            """
             self.signal_generated = True
             return self.events
         else:
@@ -133,9 +131,14 @@ class dm_event(object):
         pars_lims = kwargs["pars_lims"] if "pars_lims" in kwargs else []
         self.cross_section_original = self.cross_section
 
+        self.iter = 0
+
         def prob(x,p):
             #Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4],p[5]
             Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4]*self.t_exp,p[5]
+            self.iter += 1
+            if self.iter % 100 == 0:
+                print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
             self.normalization_signal()
             """
@@ -144,8 +147,8 @@ class dm_event(object):
             S = [self.npix-s]+ds.tolist()
             S = np.array(S)/(self.npix)
             """
-            #S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
-            S = np.array([1-np.sum(self.fs)] + self.fs.tolist())
+            S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
+            #S = np.array([1-np.sum(self.fs)] + self.fs.tolist())
             pdf = Npix*S[0]*r.TMath.Poisson(0,dc)*r.TMath.Gaus(x[0],mu*gain,noise*gain,r.kTRUE)
             nPeaks = np.floor(np.max(self.events)+1).astype(int)
             for ntot in range(1,nPeaks):
@@ -154,6 +157,17 @@ class dm_event(object):
             return pdf
 
         self.simul_ev(1e-3)
+
+        nbins = int((self.xmax-self.xmin)/0.1)
+        hist = plt.hist(self.events, bins=nbins)#, density=True)
+        n_data, dx = hist[0],hist[1]
+        n_theo = prob(dx, x0)
+        plt.plot(dx, n_theo)
+        plt.yscale("log")
+        plt.ylim(0.1,None)
+        plt.show()
+        #n = np.sum(n_data)
+
         r.gStyle.SetOptFit()
         nbins = int((self.xmax-self.xmin)/0.1)
         hist = r.TH1F('hist', 'DM PCD', nbins, self.xmin, self.xmax)
@@ -184,12 +198,16 @@ class dm_event(object):
         x0 = kwargs["x0"] if "x0" in kwargs else [self.npix/0.1, 0, 1.6, 1, 1e-4, np.log10(self.cross_section)]
         fix_pars = kwargs["fix_pars"] if "fix_pars" in kwargs else []
         pars_lims = kwargs["pars_lims"] if "pars_lims" in kwargs else []
+        upper_limit = kwargs["upper_limit"] if "upper_limit" in kwargs else None
+        simulate = kwargs["simulate"] if "simulate" in kwargs else None
+        verbose = kwargs["verbose"] if "verbose" in kwargs else False
+
         self.cross_section_original = self.cross_section
 
         def prob(p,x):
             Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4],p[5]
             #mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3]*self.t_exp,p[4]
-            print(Npix,mu,noise,gain,dc,xs)
+            #print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
             self.normalization_signal()
             """
@@ -198,36 +216,114 @@ class dm_event(object):
             S = [self.npix-s]+ds.tolist()
             S = np.array(S)/(self.npix)
             """
+            #S = np.array([1-np.sum(self.fs)] + self.fs.tolist())
             S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
-            pdf = Npix*S[0]*poisson.pmf(0,dc)*norm.pdf(x,mu*gain,noise*gain)
-            nPeaks = np.floor(np.max(self.events)+1).astype(int)
-            for ntot in range(1,nPeaks):
-                for j in range(0,ntot):
+            pdf = 0 #Npix*S[0]*poisson.pmf(0,dc)*norm.pdf(x,mu*gain,noise*gain)
+            #nPeaks = np.floor(np.max(self.events)+1).astype(int)
+            f_str_num = []
+            f_str = []
+            for ntot in range(0,self.nPeaks):
+                for j in range(0,ntot+1):
+                    f_str_num.append("Npix*S({})*P({})*G({})".format(np.round(S[j],2),np.round(poisson.pmf(ntot-j,dc),2),ntot))
+
+                    f_str.append("Npix*S({})*P({})*G({})".format(j,ntot-j,ntot))
                     pdf += Npix*S[j]*poisson.pmf(ntot-j,dc)*norm.pdf(x,(mu+ntot)*gain,noise*gain)
+            #print("+".join(f_str))
+            #print("+".join(f_str_num))
             return pdf
 
-        self.simul_ev(1e-3)
- 
+        if upper_limit:
+            dc, deltaLL = upper_limit
+            self.simul_bkg(dc)
+            self.events = self.bkg_ev
+            ### Add readout noise
+            self.events = self.events + np.random.normal(0,self.noise, self.npix)
+            self.events = self.events.tolist()
+        elif simulate:
+            dc = simulate 
+            self.simul_ev(dc)
+        elif not simulate and not upper_limit:
+            if hasattr(self, "events"):
+                pass
+            else:
+                print("Data Not yet simulated. Goodbye!!")
+
+        self.nPeaks = 5
         nbins = int((self.xmax-self.xmin)/0.1)
         hist = plt.hist(self.events, bins=nbins)#, density=True)
         n_data, dx = hist[0],hist[1]
-        n = np.sum(n_data)
 
+        """
+        if verbose:
+            dx_m = (dx[:-1] + dx[1:])/2
+            dx_m = dx[1:]#.flip(dx)))
+            n_theo = prob(x0,dx_m)*np.diff(dx)
+            plt.plot(dx_m, n_theo, color = "r", label = "Initial Guess")
+            plt.yscale("log")
+            plt.ylim(0.1,None)
+        """
+ 
         def log_like(theta,n_data,dx):
             dx_m = (dx[:-1] + dx[1:])/2
             n_theo = prob(theta,dx_m)*np.diff(dx)
-            print(np.sum(n_theo), theta[0])
-            #plt.plot(dx_m,n_data,'o')
-            #plt.plot(dx_m,n_theo)
-            #plt.yscale("log")
-            #plt.ylim(0.1, None)
-            #plt.show()
             #lnL = -np.log(scipy.special.factorial(n)) -np.sum(n_data*np.log(n_theo)) + np.sum(scipy.special.factorial(n_data))
             lnL = theta[0] - np.sum(n_data*np.log(n_theo)) 
             return lnL
 
         theta_max = minimize(log_like, x0, bounds=pars_lims,method='Powell', args = (n_data,dx)).x
         print(theta_max)
+        lnL_bkg_only = log_like(theta_max, n_data, dx)
+
+        if verbose:
+            plt.clf()
+            fig, ax = plt.subplots()
+            self.nPeaks = 6
+            nbins = int((self.xmax-self.xmin)/0.1)
+            ax.hist(self.events, bins=nbins)#, density=True)
+            n_data, dx = hist[0],hist[1]
+
+            dx_m = (dx[:-1] + dx[1:])/2
+            dx_m = dx[1:]#.flip(dx)))
+            n_theo = prob(theta_max,dx_m)*np.diff(dx)
+            plt.plot(dx_m, n_theo, color = "r", label = "Best Fit")
+            plt.yscale("log")
+            plt.ylim(0.1,None)
+            plt.legend(loc="best")
+
+            pars_name = [r"$Norm$", r"$\mu_{0}$", r"$noise$", r"$\Omega$",r"$\lambda$", r"$\sigma_{DM-e}$"]
+            fit_leg = []
+            for p, name in zip(theta_max, pars_name):
+                fit_leg.append(name+" = "+str(p))
+            textstr = "\n".join(fit_leg)
+            """
+            textstr = '\n'.join((
+                r'$\mu=%.2f$' % (mu, ),
+                r'$\mathrm{median}=%.2f$' % (median, ),
+                r'$\sigma=%.2f$' % (sigma, )))
+            """
+            # these are matplotlib.patch.Patch properties
+            props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+
+            # place a text box in upper left in axes coords
+            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=14,
+                    verticalalignment='top', bbox=props)
+
+            plt.show()
+            plt.clf()
+
+
+        def lnL_dLL(xs_range, n_data, dx):
+            """ Function to find the value where ln_max- ln_confidence = deltaLL
+            """
+            theta = np.array(theta_max[:-1]).tolist() + [xs_range]
+            return -log_like(theta, n_data, dx)-lnL_bkg_only+deltaLL
+
+        if upper_limit:
+            self.cross_section_95 = 10**bisect(lnL_dLL, pars_lims[-1][0], pars_lims[-1][1], args=(n_data,dx),rtol=1e-3)
+            print(self.cross_section_95)
+
+
+
 
 
     def verbose(self):
