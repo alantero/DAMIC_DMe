@@ -57,29 +57,6 @@ class dm_event(object):
         self.fs = np.array(self.dRdne)/self.C_sig
 
 
-    def dRdne_calc(self, xs, mx):
-        """ Calculates the normalization of the signal PDF.
-        """
-        
-        ne_i = 1 # Number of electrons produced
-        dRdne_l = []
-        ne = []
-
-        while True:
-            se = dRdne(xs,mx,ne_i,self.q,"shm",[220e5,232e5,544e5])
-            if se == 0.0:
-                break
-            dRdne_l.append(se)
-            ne.append(ne_i)
-            ne_i += 1
-        
-        dRdne_l = np.array(dRdne_l)
-        C_sig = np.sum(dRdne_l)
-        s = C_sig*self.t_exp*self.mass_det
-        fs = dRdne_l/C_sig
-        return s,fs
-
-
     def simul_ev(self, bkg_pars, **kwargs):
         """ Simulates n_s_det events for signal.
             bkg_pars contains the dark current.
@@ -141,12 +118,7 @@ class dm_event(object):
                 print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
             self.normalization_signal()
-            """
-            s,fs = self.dRdne_calc(xs,self.mass_dm)
-            ds = s*fs
-            S = [self.npix-s]+ds.tolist()
-            S = np.array(S)/(self.npix)
-            """
+            
             S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
             #S = np.array([1-np.sum(self.fs)] + self.fs.tolist())
             pdf = Npix*S[0]*r.TMath.Poisson(0,dc)*r.TMath.Gaus(x[0],mu*gain,noise*gain,r.kTRUE)
@@ -194,7 +166,10 @@ class dm_event(object):
 
 
     def likelihood(self, **kwargs):
-
+        """ Minimizes the log likelihood of signal+background model.
+            It can also calculate the upper limits given a value for dLL.
+            It can simulate the signal and background if it havent already simulated.
+        """
         x0 = kwargs["x0"] if "x0" in kwargs else [self.npix/0.1, 0, 1.6, 1, 1e-4, np.log10(self.cross_section)]
         fix_pars = kwargs["fix_pars"] if "fix_pars" in kwargs else []
         pars_lims = kwargs["pars_lims"] if "pars_lims" in kwargs else []
@@ -210,12 +185,7 @@ class dm_event(object):
             #print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
             self.normalization_signal()
-            """
-            s,fs = self.dRdne_calc(xs,self.mass_dm)
-            ds = s*fs
-            S = [self.npix-s]+ds.tolist()
-            S = np.array(S)/(self.npix)
-            """
+            
             #S = np.array([1-np.sum(self.fs)] + self.fs.tolist())
             S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
             pdf = 0 #Npix*S[0]*poisson.pmf(0,dc)*norm.pdf(x,mu*gain,noise*gain)
@@ -248,9 +218,13 @@ class dm_event(object):
             else:
                 print("Data Not yet simulated. Goodbye!!")
 
-        self.nPeaks = 5
-        nbins = int((self.xmax-self.xmin)/0.1)
-        hist = plt.hist(self.events, bins=nbins)#, density=True)
+        self.nPeaks = kwargs["nPeaks"] if "nPeaks" in kwargs else int(np.round(np.max(self.events)))
+        print("Number of electron peaks: ", self.nPeaks)
+        #self.nPeaks = 5
+        bin_size = kwargs["bin_size"] if "bin_size" in kwargs else 0.1
+        nbins = int((self.xmax-self.xmin)/bin_size)
+        ### Creates and histogram to get the bin content
+        hist = plt.hist(self.events, bins=nbins)
         n_data, dx = hist[0],hist[1]
 
         """
@@ -264,20 +238,29 @@ class dm_event(object):
         """
  
         def log_like(theta,n_data,dx):
+            ### Uses the bin center approximation for binning the likelihood
             dx_m = (dx[:-1] + dx[1:])/2
             n_theo = prob(theta,dx_m)*np.diff(dx)
             #lnL = -np.log(scipy.special.factorial(n)) -np.sum(n_data*np.log(n_theo)) + np.sum(scipy.special.factorial(n_data))
             lnL = theta[0] - np.sum(n_data*np.log(n_theo)) 
             return lnL
 
+        ### Minimizes the loglikelihood
         theta_max = minimize(log_like, x0, bounds=pars_lims,method='Powell', args = (n_data,dx)).x
-        print(theta_max)
+        print("----------- Fit Result -----------")
+        pars_name = [r"$Norm$", r"$\mu_{0}$", r"$noise$", r"$\Omega$",r"$\lambda$", r"$\sigma_{DM-e}$"]
+        fit_leg = []
+        for p, name in zip(theta_max, pars_name):
+            fit_leg.append(name+" = "+str(p))
+        textstr = "\n".join(fit_leg)
+        print(textstr) 
+
         lnL_bkg_only = log_like(theta_max, n_data, dx)
 
         if verbose:
+            ### Plot fit and histogram
             plt.clf()
             fig, ax = plt.subplots()
-            self.nPeaks = 6
             nbins = int((self.xmax-self.xmin)/0.1)
             ax.hist(self.events, bins=nbins)#, density=True)
             n_data, dx = hist[0],hist[1]
@@ -294,13 +277,9 @@ class dm_event(object):
             fit_leg = []
             for p, name in zip(theta_max, pars_name):
                 fit_leg.append(name+" = "+str(p))
+            
+            ### Legend text
             textstr = "\n".join(fit_leg)
-            """
-            textstr = '\n'.join((
-                r'$\mu=%.2f$' % (mu, ),
-                r'$\mathrm{median}=%.2f$' % (median, ),
-                r'$\sigma=%.2f$' % (sigma, )))
-            """
             # these are matplotlib.patch.Patch properties
             props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
 
@@ -312,18 +291,15 @@ class dm_event(object):
             plt.clf()
 
 
-        def lnL_dLL(xs_range, n_data, dx):
-            """ Function to find the value where ln_max- ln_confidence = deltaLL
-            """
-            theta = np.array(theta_max[:-1]).tolist() + [xs_range]
-            return -log_like(theta, n_data, dx)-lnL_bkg_only+deltaLL
-
+        ### Calculates the upper limit
         if upper_limit:
+            def lnL_dLL(xs_range, n_data, dx):
+                """ Function to find the value where ln_max- ln_confidence = deltaLL
+                """
+                theta = np.array(theta_max[:-1]).tolist() + [xs_range]
+                return -log_like(theta, n_data, dx)-lnL_bkg_only+deltaLL
             self.cross_section_95 = 10**bisect(lnL_dLL, pars_lims[-1][0], pars_lims[-1][1], args=(n_data,dx),rtol=1e-3)
             print(self.cross_section_95)
-
-
-
 
 
     def verbose(self):
