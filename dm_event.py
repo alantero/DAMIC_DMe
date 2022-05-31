@@ -43,13 +43,17 @@ class dm_event(object):
         self.ne = []
 
         while True:
-            se = dRdne(self.cross_section,self.mass_dm,ne_i,self.q,"shm",[220e5,232e5,544e5])
-            if se == 0.0:
+            try:
+                se = dRdne(self.cross_section,self.mass_dm,ne_i,self.q,"shm",[220e5,232e5,544e5])
+                if se == 0.0:
+                    break
+                self.dRdne.append(se)
+                self.ne.append(ne_i)
+                ne_i += 1
+            except IndexError:
+                ### It may reach the last index of the crystal form factor.
+                ### We avoid this
                 break
-            self.dRdne.append(se)
-            self.ne.append(ne_i)
-            ne_i += 1
-        
         self.dRdne = np.array(self.dRdne)
         self.C_sig = np.sum(self.dRdne)
         self.s = self.C_sig*self.t_exp*self.mass_det
@@ -192,6 +196,11 @@ class dm_event(object):
             
             ### Adds the 0 electron to peak to DM interaction probability 
             S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
+            ### To match the number of peaks
+            if self.nPeaks > len(S):
+                S_extended = np.zeros([self.nPeaks])
+                S_extended[:len(S)] = S
+                S = S_extended
             pdf = 0 
             
             for ntot in range(0,self.nPeaks):
@@ -228,7 +237,7 @@ class dm_event(object):
 
 
         ### Sets the number of electron peaks to fit
-        self.nPeaks = kwargs["nPeaks"] if "nPeaks" in kwargs else int(np.round(np.max(self.events)))
+        self.nPeaks = kwargs["nPeaks"] if "nPeaks" in kwargs else int(np.round(np.max(self.events)))+1
         print("Number of electron peaks: ", self.nPeaks)
 
         ### Sets the number of bins and the bin content
@@ -299,7 +308,7 @@ class dm_event(object):
             ### Plot fit and histogram
             plt.clf()
             fig, ax = plt.subplots()
-            nbins = int((self.xmax-self.xmin)/0.1)
+            nbins = int((self.xmax-self.xmin)/bin_size)
             ax.hist(self.events, bins=nbins)#, density=True)
             n_data, dx = hist[0],hist[1]
 
@@ -339,8 +348,6 @@ class dm_event(object):
                 """
                 theta = np.array(theta_max[:-1]).tolist() + [xs_range]
                 return -log_like(theta, n_data, dx)-lnL_max+deltaLL
-            self.cross_section_dLL = 10**bisect(lnL_dLL, pars_lims[-1][0], pars_lims[-1][1], args=(n_data,dx),rtol=1e-3)
-            print(self.cross_section_dLL)
 
             if verbose:
                 xs_range = np.linspace(pars_lims[-1][0], pars_lims[-1][1], 100)
@@ -351,7 +358,12 @@ class dm_event(object):
                 plt.ylabel(r"$d\mathcal{LL}$")
                 plt.xlabel(r"$\sigma$ [cm$^{-2}$]")
                 plt.show()
- 
+
+            ### Upper limit cross section
+            self.cross_section_dLL = 10**bisect(lnL_dLL, pars_lims[-1][0], pars_lims[-1][1], args=(n_data,dx),rtol=1e-3)
+            print(self.cross_section_dLL)
+
+
 
     def verbose(self):
         print("------------ Using {} model -----------".format(self.dRdE_name))

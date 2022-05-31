@@ -102,6 +102,7 @@ def dRdE(material, mX, Ee, FDMn, halo, params):
         Mcell = materials[material][0]
         Eprefactor = materials[material][1]
         Ei = int(np.floor(Ee*10)) # eV
+        #print("Ei: ", Ei)
         prefactor = ccms**2*sec2days*rho_X/mX*1/Mcell*alpha*me_eV**2 / mu_Xe(mX)**2
         array_ = np.zeros(nq)
         qi = np.arange(1,nq+1)
@@ -179,9 +180,9 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params, material = "Si"):
         print('$n_e$ must be > 0')
         return 0
     else:
+        ### FIXME Check the +1
         tmpEbin = int(np.floor(Ebin/dE))+1
         tmpdRdE = np.zeros(tmpEbin)
-
 
         """
         start_time = time.time()
@@ -196,11 +197,13 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params, material = "Si"):
         #start_time = time.time()
         for i in range(tmpEbin):
             ## add up in bins of [1.2,4.9],[5,8.7],...
+            #print("-----------")
+            #print(ne-1, Ebin, dE, i, materials[material][2])
             tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+materials[material][2], FDMn, halo, params)
         dRdne = np.sum(tmpdRdE, axis = 0)
         #print("Time Fast: ", (time.time() - start_time)/60, ' min')
         #print("Fast: ", dRdne)
-        return sigmae*dRdne/365
+        return sigmae*dRdne#/365
 
 def dRdnearray(material, mX, Ebin, FDMn, halo, params):
     """
