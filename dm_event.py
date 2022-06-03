@@ -16,8 +16,10 @@ class dm_event(object):
         self.q, self.mass_dm, self.cross_section = q, mass_dm, cross_section
         self.mass_det, self.t_exp = mass_det, t_exp
         self.nx, self.ny, self.nccd = nx, ny, nccd
-        self.n_image = int(np.round(self.t_exp/(tread/24)))
-        self.pix_mass = self.nx*self.ny*self.mass_det/ccd_mass
+        self.tread = tread/24
+        #self.n_image = int(np.round(self.t_exp/self.tread))
+        self.n_image = self.mass_det/ccd_mass
+        self.pix_mass = self.nx*self.ny/ccd_mass#*self.mass_det/ccd_mass
         #self.npix = self.nccd*self.nx*self.ny*self.n_image
         self.npix = int(np.round(self.pix_mass*self.n_image))
         self.xmin, self.xmax = xmin, xmax
@@ -56,7 +58,7 @@ class dm_event(object):
                 break
         self.dRdne = np.array(self.dRdne)
         self.C_sig = np.sum(self.dRdne)
-        self.s = self.C_sig*self.t_exp*self.mass_det
+        self.s = self.C_sig*self.tread*self.mass_det
         self.n_s_det = np.random.poisson(self.s)
         self.fs = np.array(self.dRdne)/self.C_sig
 
@@ -100,7 +102,7 @@ class dm_event(object):
 
     def simul_bkg(self, darkC):
         self.darkC = darkC
-        self.lamb = darkC*self.t_exp
+        self.lamb = darkC*self.tread
         print("Lamb: ", self.lamb)
         ### Events in Eee
         self.bkg_ev = np.random.poisson(self.lamb, self.npix)
@@ -186,7 +188,7 @@ class dm_event(object):
         self.cross_section_original = self.cross_section
 
         def prob(p,x):
-            Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4]*self.t_exp,p[5]
+            Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4]*self.tread,p[5]
             #print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
             self.normalization_signal()
