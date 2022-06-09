@@ -1,15 +1,15 @@
-import sys
+#import sys
 import os
 import numpy as np
 from scipy.special import erf
-from scipy.integrate import quad
-from scipy import interpolate
-from scipy.interpolate import interp1d
+#from scipy.integrate import quad
+#from scipy import interpolate
+#from scipy.interpolate import interp1d
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import matplotlib.ticker as tck
-import time
+#import matplotlib as mpl
+#import matplotlib.pyplot as plt
+#import matplotlib.ticker as tck
+#import time
 
 from QEdark_constants import *
 from DM_halo_dist import *
@@ -103,7 +103,7 @@ def dRdE(material, mX, Ee, FDMn, halo, params):
         Eprefactor = materials[material][1]
         Ei = int(np.floor(Ee*10)) # eV
         #print("Ei: ", Ei)
-        prefactor = ccms**2*sec2days*rho_X/mX*1/Mcell*alpha*me_eV**2 / mu_Xe(mX)**2
+        prefactor = ccms**2*sec2year*rho_X/mX*1/Mcell*alpha*me_eV**2 / mu_Xe(mX)**2
         array_ = np.zeros(nq)
         qi = np.arange(1,nq+1)
         q = qi*qunit
@@ -134,7 +134,7 @@ def dRdE_slow(material, mX, Ee, FDMn, halo, params):
         Mcell = materials[material][0]
         Eprefactor = materials[material][1]
         Ei = int(np.floor(Ee*10)) # eV
-        prefactor = ccms**2*sec2days*rho_X/mX*1/Mcell*alpha*me_eV**2 / mu_Xe(mX)**2
+        prefactor = ccms**2*sec2year*rho_X/mX*1/Mcell*alpha*me_eV**2 / mu_Xe(mX)**2
         array_ = np.zeros(nq)
         for qi in range(1,nq+1):
             q = qi*qunit
@@ -203,7 +203,7 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params, material = "Si"):
         dRdne = np.sum(tmpdRdE, axis = 0)
         #print("Time Fast: ", (time.time() - start_time)/60, ' min')
         #print("Fast: ", dRdne)
-        return sigmae*dRdne#/365
+        return sigmae*dRdne/365
 
 def dRdnearray(material, mX, Ebin, FDMn, halo, params):
     """
