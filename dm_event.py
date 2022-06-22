@@ -96,7 +96,7 @@ class dm_event(object):
             self.C_sig = np.sum(self.dRdne)
             self.s = self.C_sig*self.t_exp*self.mass_det
             #print(self.s)
-            #self.n_s_det = np.random.poisson(self.s)
+            self.n_s_det = np.random.poisson(self.s)
             self.fs = np.array(self.dRdne)/self.C_sig
 
 
@@ -268,11 +268,12 @@ class dm_event(object):
                 self.simul_ev(dc)
             ### Add readout noise
         if upper_limit and not simulate:
-            cf = upper_limit
+            cf, _ = upper_limit
             deltaLL = chi2.ppf(cf,df=1)/2
             self.nPeaks = int(np.round(np.max(self.events)))
+            if hasattr(self,"events"):
+                pass
         elif simulate and not upper_limit:
-            #mu0,noise,dc = simulate 
             self.simul_ev(simulate)
         elif not simulate and not upper_limit:
             if hasattr(self, "events"):
@@ -293,22 +294,7 @@ class dm_event(object):
         hist = np.histogram(self.events, nbins)
         n_data, dx = hist[0],hist[1]
 
-
-        """
-        if verbose:
-            ### Plot the events histogram (Useful to see the number of peaks)
-            dx_m = (dx[:-1] + dx[1:])/2
-            dx_m = dx[1:]#.flip(dx)))
-            n_theo = prob(x0,dx_m)*np.diff(dx)
-            #plt.plot(dx_m, n_theo, color = "r", label = "Initial Guess")
-            plt.hist(self.events, nbins)
-            plt.yscale("log")
-            plt.ylim(0.1,None)
-            plt.show() 
-            plt.clf()
-        """
-
-
+        
         def log_like(theta,n_data,dx):
             ### Uses the bin center approximation for binning the likelihood
             dx_m = (dx[:-1] + dx[1:])/2
@@ -351,7 +337,14 @@ class dm_event(object):
             @cached(algorithm=CachingAlgorithmFlag.LFU)
             def log_like_minuit(Norm,mu,noise,gain,lamb,sigma):
                 theta = [Norm,mu,noise,gain,lamb,sigma]
-                return log_like(theta, n_data, dx)
+                ln_penalty = 0
+                if 2 in fix_pars: # Readout gaussian penalty
+                    ln_penalty += (x0[2]-noise)**2/np.diff(pars_lims[2])
+
+                if 1 in fix_pars: # Readout gaussian penalty
+                    ln_penalty += (x0[1]-mu)**2/np.diff(pars_lims[1])
+
+                return ln_penalty + log_like(theta, n_data, dx)
             x0_dict = {}
             for i in range(len(x0)):
                 x0_dict[pars_name_dict[i]] = x0[i]
@@ -527,7 +520,7 @@ class dm_event(object):
         print("Exposure [g*days]: ", self.mass_det*1e3*self.t_exp)
         print("Number of Total Pixels: ", self.npix)
         print("Number of Signal events: ", self.n_s_det)
-        if hasattr(self, "theta"): print("Likelihood parameters: ", self.theta)
+        if hasattr(self, "theta"): print("Likelihood parameters: ", self.theta_max)
         if hasattr(self, "cross_section_dLL"): print("Upper Limit Cross Section: ", self.cross_section_dLL)
         if hasattr(self, "theta_confidence"): print("Theta Confidence intervals: ", self.confidence)
 
