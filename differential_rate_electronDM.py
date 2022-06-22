@@ -3,7 +3,7 @@ import numpy as np
 from scipy.special import erf
 
 #import matplotlib.pyplot as plt
-#import time
+import time
 
 from QEdark_constants import *
 from DM_halo_dist import *
@@ -15,10 +15,21 @@ set directories
 dataDir = os.getcwd()
 FigDir = os.getcwd() + '/figs'
 
+rho_X = 0.4e9 # eV/cm^3
+v0 = 230e5 # cm/s
+vE = 240e5
+vesc = 600e5
+
+"""
 rho_X = 0.3e9 # eV/cm^3
-v0 = 232e5 # cm/s
-vE = 220e5
+v0 = 220e5 # cm/s
+vE = 232e5
 vesc = 544e5
+"""
+
+
+
+
 
 def vmin(EE,qin,mX):
     q = qin * alpha *me_eV
@@ -43,7 +54,7 @@ fcrys = {'Si': np.transpose(np.resize(np.loadtxt(dataDir+'/Si_f2.txt',skiprows=1
 #materials = {'Si': [2*28.0855*amu2kg, 2.0, 1.2, 3.8,wk/4*fcrys['Si']], \
 #             'Ge': [2*72.64*amu2kg, 1.8, 0.7, 2.8,wk/4*fcrys['Ge']]}
 
-materials = {'Si': [2*28.0855*amu2kg, 2.0, 1.2, 3.6, wk/4*fcrys['Si']], \
+materials = {'Si': [2*28.0855*amu2kg, 2.0, 1.11, 3.6, wk/4*fcrys['Si']], \
              'Ge': [2*72.64*amu2kg, 1.8, 0.7, 2.8,wk/4*fcrys['Ge']]}
 
 
@@ -66,8 +77,8 @@ def mu_Xe(mX):
 
 #---------------------------------------------------------
 # Velocity integral eta
-def calcEta(vmin, vlag=232.0, sigmav=156.0,vesc=544.0):
-     
+#def calcEta(vmin, vlag=230.0, sigmav=156.0,vesc=544.0):
+def calcEta(vmin, vlag=vE, sigmav=v0/np.sqrt(2),vesc=vesc):
     aplus = np.minimum((vmin+vlag), vmin*0.0 + vesc)/(np.sqrt(2)*sigmav)
     aminus = np.minimum((vmin-vlag), vmin*0.0 + vesc)/(np.sqrt(2)*sigmav)
     aesc = vesc/(np.sqrt(2)*sigmav)
@@ -108,8 +119,8 @@ def dRdE(material, mX, Ee, FDMn, halo, params):
         vmin = (q/(2*mX)+Ee/q)*ccms
         #vmin_where = np.where(vmin > (vesc+vE)*1.1)[0]
         vmin_where = np.where(vmin > (vesc+vE))[0]
-        #eta = calcEta(vmin*1e-5, params[0]*1e-5, params[1]*1e-5, params[2]*1e-5)*1e-5
-        eta = calcEta(vmin*1e-5)*1e-5#, params[0]*1e-5, params[1]*1e-5, params[2]*1e-5)*1e-5
+        eta = calcEta(vmin*1e-5, params[0]*1e-5, params[1]*1e-5, params[2]*1e-5)*1e-5
+        #eta = calcEta(vmin*1e-5)*1e-5#, params[0]*1e-5, params[1]*1e-5, params[2]*1e-5)*1e-5
         #print([qi-1], [Ei-1])
         array_[qi-1] = Eprefactor*(1/q)*eta*FDM(q,n)**2*materials[material][4][qi-1, Ei-1]
         array_[vmin_where-1] = 0
@@ -171,7 +182,9 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params, material = "Si"):
     """
     Ebin = materials[material][3]
     ## check if ne is defined
+
     if ne*Ebin > dE*nE:
+        print(ne,sigmae)
         print('$n_e$ is out of range, pick a smaller value')
         return 0
     elif ne == 0:
@@ -182,7 +195,7 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params, material = "Si"):
         tmpdRdE = np.zeros(tmpEbin)
 
         """
-        #start_time = time.time()
+        start_time = time.time()
         for i in range(tmpEbin):
             ## add up in bins of [1.2,4.9],[5,8.7],...
             tmpdRdE[i] = dRdE_slow(material, mX, (ne-1)*Ebin+dE*i+materials[material][2], FDMn, halo, params)
@@ -196,13 +209,13 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params, material = "Si"):
         for i in range(tmpEbin):
             ## add up in bins of [1.2,4.9],[5,8.7],...
             #print(ne-1, Ebin, dE, i, materials[material][2])
-            #tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+materials[material][2], FDMn, halo, params)
-            tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+1.11, FDMn, halo, params)
+            tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+materials[material][2], FDMn, halo, params)
+            #tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+1.11, FDMn, halo, params)
         dRdne = np.sum(tmpdRdE, axis = 0)
         #print("Time Fast: ", (time.time() - start_time)/60, ' min')
         #print("Fast: ", dRdne)
         
-        return sigmae*dRdne#/365
+        return sigmae*dRdne/365
 
 def dRdnearray(material, mX, Ebin, FDMn, halo, params):
     """
