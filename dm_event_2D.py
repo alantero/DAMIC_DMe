@@ -6,6 +6,11 @@ from scipy.optimize import bisect
 from matplotlib import colors 
 from scipy.stats import multivariate_normal
 import pickle
+from numpy import linalg 
+from scipy.stats import chi2
+import iminuit
+from memoization import cached , CachingAlgorithmFlag
+
 
 from differential_rate_electronDM import *
 
@@ -88,8 +93,78 @@ class dm_event2D(object):
             self.s = self.C_sig*self.t_exp*self.mass_det
             self.fs = np.array(self.dRdne)/self.C_sig
 
-            for amp in self.namp:
-                self.n_s_det.append( np.random.poisson(self.s) )
+            if not hasattr(self,"signal_generated"):
+                for amp in self.namp:
+                    self.n_s_det.append( np.random.poisson(self.s) )
+
+
+    def cov_diag(self, darkC, rho, mu, noise,bin_size=0.1):
+        noise1, noise2 = noise
+        mu1,mu2 = mu
+        """
+        self.simul_bkg(darkC)
+        
+        self.events_diag = []
+        self.events = []
+
+        cov = self.cov_matrix(self.noise[0], self.noise[1], rho)
+        read_multi = multivariate_normal.rvs(mu, cov=cov, size=self.npix) 
+
+        self.events = self.bkg_ev
+        for amp in self.namp:
+            ### Add readout noise
+            self.events[amp] = self.events[amp] + read_multi[:,amp]
+        """
+
+        self.events_diag = []
+        self.simul_ev(darkC, noise=noise, mu=mu, bin_size=bin_size, rho=rho)
+        sqrt_noise = np.sqrt(4*rho**2*noise1**2*noise2**2+noise1**4-2*noise1**2*noise2**2+noise2**4)
+        q1,q2 = self.events[0], self.events[1]
+        self.events_diag.append(rho*noise1*noise2*(mu2-q2) -(-mu1-q1)*(-noise1**2+noise2**2+sqrt_noise)/sqrt_noise)
+        self.events_diag.append(-rho*noise1*noise2*(mu2-q2) -(-mu1-q1)*(noise1**2-noise2**2+sqrt_noise)/sqrt_noise)
+
+        plt.clf()
+        plt.figure(1)
+        nbins = int((self.xmax-self.xmin)/bin_size)
+
+        self.plot_hist2D()
+        #plt.hist2d(q1, q2, bins=nbins, cmap = "Greens", norm = colors.LogNorm())#, label="Correlated")
+        #plt.imshow(self.hist, aspect="auto", cmap = "Greens", norm = colors.LogNorm())
+        #plt.xlabel("Amp. {}".format(self.namp[0]))
+        #plt.ylabel("Amp. {}".format(self.namp[1]))
+ 
+        plt.figure(2)
+
+        cov = self.cov_matrix(noise1, noise2, rho)
+        e,P = linalg.eig(cov)
+        print(cov)
+        D = np.zeros_like(cov)
+        D = np.diag(e)
+        print(np.sqrt(D))
+        print(P.dot(D).dot(linalg.inv(P)))
+        X_ = linalg.inv(P).dot(np.array(self.events)-np.round(self.events))
+        X_ = X_+ linalg.inv(P).dot(np.round(self.events))
+        #X_ = P.T.dot(self.events).T 
+        """
+        def y_(i):
+            return rho*noise1*noise2*(mu2-i)/sqrt_noise,rho*noise1*noise2*(-mu2+i)/sqrt_noise
+        
+        def x_(j):
+            return -(mu1-j)*(-noise1**2+noise2**2+sqrt_noise)/(2*sqrt_noise), -(mu1-j)*(noise1**2-noise2**2+sqrt_noise)/(2*sqrt_noise) 
+ 
+        for i in self.events[0]:
+            x, y = y_(i)
+            plt.scatter(x,y)
+        for j in self.events[1]:
+            x, y = x_(i)
+            plt.scatter(x,y)
+        """
+
+        plt.hist2d(X_[0], X_[1], bins=nbins, cmap = "Greens", norm = colors.LogNorm())#, label="No correlation")
+        #plt.imshow(self.hist, aspect="auto", cmap = "Greens", norm = colors.LogNorm())
+        plt.xlabel("q{}".format(self.namp[0]))
+        plt.ylabel("q{}".format(self.namp[1]))
+        plt.show()
 
 
     def cov_matrix(self,sigma1,sigma2,rho):
@@ -114,8 +189,8 @@ class dm_event2D(object):
             #### Add background events
             self.simul_bkg(darkC)
             self.simul_dm()
-            for amp in self.namp:
-                self.events.append(self.signal_ev[amp] + self.bkg_ev[amp])
+            #for amp in self.namp:
+            #    self.events.append(self.signal_ev[amp] + self.bkg_ev[amp])
 
             ### Creates 2D histogram to simulate covariate readout noise
             #self.hist, xedge, yedge = np.histogram2d(self.events[0], self.events[1], bins=nbins)
@@ -151,7 +226,7 @@ class dm_event2D(object):
     def simul_bkg(self, darkC):
         self.lamb, self.bkg_ev = [], []
         for amp in self.namp:
-            self.lamb.append( darkC[amp]*self.t_exp )
+            self.lamb.append( darkC[amp] )
             ### Events in Eee
             self.bkg_ev.append( np.random.poisson(self.lamb[amp], self.npix) )
             print("Lamb Amp {}: ".format(amp), self.lamb[amp])
@@ -186,7 +261,7 @@ class dm_event2D(object):
 
         def prob(p,data):
             #Npix,mu1,mu2,noise1,noise2,rho,gain1,gain2,dc1,dc2,xs = p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8]*self.t_exp*self.nx_bin*self.ny_bin,p[9]*self.t_exp*self.nx_bin*self.ny_bin,p[10]
-            Npix,mu1,mu2,noise1,noise2,rho,gain1,gain2,dc1,dc2,xs = p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8]*self.t_exp,p[9]*self.t_exp,p[10]
+            Npix,mu1,mu2,noise1,noise2,rho,gain1,gain2,dc1,dc2,xs = p[0],p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8],p[9],p[10]
             #print(pars_name)    
             #print(Npix,mu1,mu2,noise1,noise2,rho,gain1,gain2,dc1,dc2,xs)
             #print(Npix,mu,noise,gain,dc,xs)
@@ -230,21 +305,26 @@ class dm_event2D(object):
             return pdf
 
         if upper_limit and simulate:
-            deltaLL, bkg_only = upper_limit
-            dc = simulate 
+            cf, bkg_only = upper_limit
+            deltaLL = chi2.ppf(cf,df=1)/2
+            mu0,noise,dc = simulate
             if bkg_only:
                 self.simul_bkg(dc)
                 self.events = self.bkg_ev
-                self.events = self.events + np.random.normal(0,self.noise, self.npix)
+                self.nPeaks = int(np.max(self.events))
+                self.events = self.events + np.random.normal(mu0,noise, self.npix)
                 self.events = self.events.tolist()
             else:
                 self.simul_ev(dc)
             ### Add readout noise
         if upper_limit and not simulate:
-            deltaLL = upper_limit
+            cf, _ = upper_limit
+            deltaLL = chi2.ppf(cf,df=1)/2
+            self.nPeaks = int(np.round(np.max(self.events)))
+            if hasattr(self,"events"):
+                pass
         elif simulate and not upper_limit:
-            dc = simulate 
-            self.simul_ev(dc)
+            self.simul_ev(simulate)
         elif not simulate and not upper_limit:
             if hasattr(self, "events"):
                 pass
@@ -275,12 +355,15 @@ class dm_event2D(object):
             X,Y = np.meshgrid(dx_m,dy_m)
             data = np.dstack((X, Y))
             n_theo = prob(theta, data)*np.diff(dx)*np.diff(dy)
- 
-            #n_theo = prob(theta,dx_m,dy_m)*np.diff(dx)*np.diff(dy)
-            #lnL = theta[0] - np.sum(n_data*np.log(n_theo)) 
-            lnL = np.sum(n_theo) - np.sum(n_data*np.log(n_theo)) 
+            ### Avoid empty bins
+            n_theo = n_theo[n_data>0]
+            n_data = n_data[n_data>0]
+            LL = n_data*np.log(n_theo)-n_theo+n_data-n_data*np.log(n_data)-0.5*np.log(2*np.pi*n_data) 
+            lnL = -np.sum(LL)
             return lnL
 
+
+        pars_name_dict = ["Norm","mu1","mu2","noise1","noise2","rho","gain1","gain2","lamb1","lamb2","sigma"]
         ### Minimizes the loglikelihood
         if len(fix_pars) != 0:
             print("----------- Fixed Parameters -----------")
@@ -296,18 +379,43 @@ class dm_event2D(object):
             pars_lims_nofix = np.array(pars_lims)[not_fix_pars]
             x0_nofix = x0[not_fix_pars]
 
-            def log_like_fix(theta, n_data, dx,dy):
-                """ Function with fixed parameters
-                """
-                p[not_fix_pars] = theta
-                return log_like(p, n_data, dx,dy)
+            #def log_like_fix(theta, n_data, dx,dy):
+            #    """ Function with fixed parameters
+            #    """
+            #    p[not_fix_pars] = theta
+            #    return log_like(p, n_data, dx,dy)
 
-            ### Minimizes log-likelihood
-            theta_max = minimize(log_like_fix, x0_nofix, bounds=pars_lims_nofix,method=method, args = (n_data,dx,dy)).x
+            #### Minimizes log-likelihood
+            #theta_max = minimize(log_like_fix, x0_nofix, bounds=pars_lims_nofix,method=method, args = (n_data,dx,dy)).x
 
-            ### Returns fitted+fixed parameters
-            p[not_fix_pars] = theta_max
-            theta_max = p
+            #### Returns fitted+fixed parameters
+            #p[not_fix_pars] = theta_max
+            #theta_max = p
+
+            @cached(algorithm=CachingAlgorithmFlag.LFU)
+            def log_like_minuit(Norm,mu1,mu2,noise1,noise2,rho,gain1,gain2,lamb1,lamb2,sigma):
+                theta = [Norm,mu1,mu2,noise1,noise2,rho,gain1,gain2,lamb1,lamb2,sigma]
+                return log_like(theta, n_data, dx, dy)
+            x0_dict = {}
+            for i in range(len(x0)):
+                x0_dict[pars_name_dict[i]] = x0[i]
+
+            m = iminuit.Minuit(log_like_minuit,**x0_dict)
+            m.errors[x0_dict.keys()] = 1e-5
+            if upper_limit:
+                m.errordef = deltaLL
+            else:
+                m.errordef = m.LIKELIHOOD
+            m.strategy=2
+            m.limits[x0_dict.keys()] = pars_lims
+            print(x0)
+            print(pars_lims)
+            for i in fix_pars:
+               m.fixed[pars_name_dict[i]] = True
+            m.migrad()
+            theta_max = m.values[x0_dict.keys()]
+
+
         else:
             ### Not fixed parameters
             theta_max = minimize(log_like, x0, bounds=pars_lims,method=method, args = (n_data,dx,dy)).x
@@ -319,7 +427,6 @@ class dm_event2D(object):
         textstr = "\n".join(fit_leg)
         print(textstr) 
         print("----------------------------------")
-
 
         if verbose:
             plt.clf()
@@ -370,7 +477,7 @@ class dm_event2D(object):
             hist = ax2.hist2d(self.events[0], self.events[1], bins=nbins, cmap = "Greens")
             ax2.set_xlabel("Amp. {}".format(self.namp[0]))
             ax2.set_ylabel("Amp. {}".format(self.namp[1]))
-            ax2.contour(X, Y, Z, verbose,colors='black', label = "Best Fit",alpha=0.6)
+            ax2.contour(X, Y, Z, verbose,colors='black',alpha=0.6)
 
             plt.show()
             plt.clf()
@@ -403,14 +510,12 @@ class dm_event2D(object):
             self.cross_section_dLL = 10**bisect(lnL_dLL, pars_lims[-1][0], pars_lims[-1][1], args=(n_data,dx,dy),rtol=1e-3)
             print(self.cross_section_dLL)
 
-
     def import_events(self, filename):
         pkl_data = pickle.load(open(filename,"rb"))
         self.events, total_pix, self.texp = pkl_data["Pixels"], pkl_data["TotalPix"], 1/0.26#pkl_data["texp"]*5
         self.npix = len(self.events[0])
         self.mass_det=self.ccd_mass*self.npix/total_pix
-        print("{} g*days".format(self.mass_det*self.texp*1000))
-
+        #print("{} g*days".format(self.mass_det*self.texp*1000))
 
     def verbose(self):
         print("------------ Using {} model -----------".format(self.dRdE_name))
