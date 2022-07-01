@@ -15,8 +15,8 @@ def etaSHM(vmin, _params):
     Fiducial values are v0=220 km/s, vE=232 km/s, vesc= 544 km/s
     params = [v0, vE, vesc]
     """
-    v0 = _params[0]
-    vE = _params[1]
+    v0 = _params[1]
+    vE = _params[0]
     vesc = _params[2]
     KK=v0**3*(-2.0*np.exp(-vesc**2/v0**2)*np.pi*vesc/v0+np.pi**1.5*erf(vesc/v0))
 #    print('KK=',KK)

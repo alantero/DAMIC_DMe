@@ -1,20 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import ROOT as r
-import scipy.special
 from scipy.stats import norm
 from scipy.stats import poisson
 from scipy.optimize import minimize
 from scipy.optimize import bisect 
 from scipy.optimize import brentq
-from scipy.special import factorial
 import emcee
 import corner
 from scipy.stats import chi2
 import iminuit
 from memoization import cached , CachingAlgorithmFlag
 import pandas as pd
-
+import pickle
 
 
 from WIMpy import DMUtils as DMU
@@ -22,7 +20,7 @@ from differential_rate_electronDM import *
 
 
 class dm_event(object):
-    def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si"):
+    def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si",rhoDM=0.3,Eeh=3.77,vpars=[232e5,220e5,544e5]):
         self.q, self.mass_dm, self.cross_section = q, mass_dm, cross_section
         self.mass_det, self.t_exp = mass_det, t_exp
         self.nx, self.ny, self.nccd = nx, ny, nccd
@@ -35,7 +33,7 @@ class dm_event(object):
         self.npix = int(np.round(self.mask_frac*self.nccd*self.nx/self.nxbin*self.ny/self.nybin*self.n_image))
         #self.npix = int(np.round(self.pix_mass*self.n_image))
         self.xmin, self.xmax = xmin, xmax
-        
+        self.vpars, self.rhoDM, self.Eeh = vpars, rhoDM, Eeh
         ### dRdE model
         self.dRdE_name = dRdE_name
         self.dRdE_model = dRdne#getattr(DMU, self.dRdE_name)
@@ -45,9 +43,10 @@ class dm_event(object):
         self.mu = 0
         self.gain = 1
 
+        self.normalization_signal()
         self.xs_nosignal()
         self.normalization_signal()
-
+        self.diffusion = False
 
     def xs_nosignal(self):
         original_xs = self.cross_section
@@ -62,7 +61,6 @@ class dm_event(object):
                 break
         self.lowest_cross_section = self.cross_section
         self.cross_section = original_xs
-        self.n_s_det = np.random.poisson(self.s)
         #print("Lowest Cross Section: ", self.lowest_cross_section)
 
     def normalization_signal(self):
@@ -73,7 +71,7 @@ class dm_event(object):
         self.dRdne = []
         self.ne = []
 
-        if hasattr(self, "lowest_cross_section") and self.cross_section <= self.lowest_cross_section    :
+        if hasattr(self, "lowest_cross_section") and self.cross_section <= self.lowest_cross_section:
             self.dRdne = np.array([0]) 
             self.s = 0
             self.C_sig = 0
@@ -82,7 +80,8 @@ class dm_event(object):
         else:
             while True:
                 try:
-                    se = dRdne(self.cross_section,self.mass_dm,ne_i,self.q,"shm",[220e5,232e5,544e5])
+                    se = dRdne(self.cross_section,self.mass_dm,ne_i,self.q,"shm",self.vpars,rhoDM=self.rhoDM,Ebin=self.Eeh)
+                    #print(ne_i,se,self.cross_section)
                     if se == 0.0:
                         break
                     self.dRdne.append(se)
@@ -95,8 +94,10 @@ class dm_event(object):
             self.dRdne = np.array(self.dRdne)
             self.C_sig = np.sum(self.dRdne)
             self.s = self.C_sig*self.t_exp*self.mass_det
-            #print(self.s)
-            self.n_s_det = np.random.poisson(self.s)
+            #print("s",self.s)
+            if not hasattr(self,"signal_simulated"):
+                self.n_s_det = np.random.poisson(self.s)
+                self.signal_simulated = True
             self.fs = np.array(self.dRdne)/self.C_sig
 
 
@@ -135,7 +136,7 @@ class dm_event(object):
         self.signal_ev = np.zeros([self.npix])
         dm_ev = np.random.choice(self.ne, self.n_s_det, p=self.fs)
         self.signal_ev[nx] = dm_ev
-
+    
     def simul_bkg(self, darkC):
         #self.darkC = darkC
         #self.lamb = darkC*self.tread*self.nxbin*self.nybin
@@ -144,71 +145,6 @@ class dm_event(object):
         ### Events in Eee
         self.bkg_ev = np.random.poisson(self.lamb, self.npix)
 
-
-    """
-    def joint_probability(self, **kwargs):
-
-        x0 = kwargs["x0"] if "x0" in kwargs else [self.npix/0.1, 0, 1.6, 1, 1e-4, np.log10(self.cross_section)]
-        fix_pars = kwargs["fix_pars"] if "fix_pars" in kwargs else []
-        pars_lims = kwargs["pars_lims"] if "pars_lims" in kwargs else []
-        self.cross_section_original = self.cross_section
-
-        self.iter = 0
-
-        def prob(x,p):
-            #Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4],p[5]
-            Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4]*self.t_exp,p[5]
-            self.iter += 1
-            if self.iter % 100 == 0:
-                print(Npix,mu,noise,gain,dc,xs)
-            self.cross_section = 10**xs
-            self.normalization_signal()
-            
-            S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
-            #S = np.array([1-np.sum(self.fs)] + self.fs.tolist())
-            pdf = Npix*S[0]*r.TMath.Poisson(0,dc)*r.TMath.Gaus(x[0],mu*gain,noise*gain,r.kTRUE)
-            nPeaks = np.floor(np.max(self.events)+1).astype(int)
-            for ntot in range(1,nPeaks):
-                for j in range(0,ntot):
-                    pdf += Npix*S[j]*r.TMath.Poisson(ntot-j,dc)*r.TMath.Gaus(x[0],(mu+ntot)*gain,noise*gain,1)
-            return pdf
-
-        self.simul_ev(1e-3)
-
-        nbins = int((self.xmax-self.xmin)/0.1)
-        hist = plt.hist(self.events, bins=nbins)#, density=True)
-        n_data, dx = hist[0],hist[1]
-        n_theo = prob(dx, x0)
-        plt.plot(dx, n_theo)
-        plt.yscale("log")
-        plt.ylim(0.1,None)
-        plt.show()
-        #n = np.sum(n_data)
-
-        r.gStyle.SetOptFit()
-        nbins = int((self.xmax-self.xmin)/0.1)
-        hist = r.TH1F('hist', 'DM PCD', nbins, self.xmin, self.xmax)
-        for ev in self.events:
-            hist.Fill(ev)
-        fitfunc = r.TF1("fitfunc",prob,self.xmin,self.xmax, 6)
-        #fitfunc.SetParameters(self.npix/0.1, 0, 0.1, 1, 1e-4*self.t_exp, np.log10(self.cross_section))
-        fitfunc.SetParameters(x0[0],x0[1],x0[2],x0[3],x0[4],x0[5])
-        fitfunc.SetParNames("Norm", "#mu_{0}", "noise", "#Omega","#lambda", "#sigma_{DM-e}")
-
-        if len(pars_lims)>0:
-            for i,lim in enumerate(pars_lims):
-                fitfunc.SetParLimits(i,lim[0],lim[1])
-
-        if len(fix_pars)>0:
-            for p_i in fix_pars:
-                print("Parameter Fixed: ", fitfunc.GetParName(p_i))
-                fitfunc.FixParameter(p_i,x0[p_i])
-
-        f0 = hist.Fit(fitfunc, "QSL")
-        c = r.TCanvas()
-        hist.Draw()
-        c.SetLogy()
-    """
 
     def likelihood(self, **kwargs):
         """ Minimizes the log likelihood of signal+background model.
@@ -228,14 +164,17 @@ class dm_event(object):
             Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4],p[5]
             #print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
-            self.normalization_signal()
+            if self.diffusion:
+                self.normalization_signal_diffusion() 
+            else:
+                self.normalization_signal()
  
             #f_str_num = []
             #f_str = []
             
             ### Adds the 0 electron to peak to DM interaction probability 
             S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
-            ### To match the number of peaks
+            ### If the number of signals electrons is less than background the number of peaks is extended
             if self.nPeaks > len(S):
                 S_extended = np.zeros([self.nPeaks])
                 S_extended[:len(S)] = S
@@ -258,14 +197,17 @@ class dm_event(object):
             cf, bkg_only = upper_limit
             deltaLL = chi2.ppf(cf,df=1)/2
             mu0,noise,dc = simulate 
+            #print(mu0, noise, dc)
             if bkg_only:
                 self.simul_bkg(dc)
                 self.events = self.bkg_ev
                 self.nPeaks = int(np.max(self.events))
-                self.events = self.events + np.random.normal(mu0,noise, self.npix)
+                self.events = self.events + np.random.normal(mu0,noise,self.npix)
                 self.events = self.events.tolist()
             else:
-                self.simul_ev(dc)
+                print("Hola")
+                self.simul_ev(simulate)
+                self.nPeaks = int(np.max(self.events))
             ### Add readout noise
         if upper_limit and not simulate:
             cf, _ = upper_limit
@@ -355,7 +297,8 @@ class dm_event(object):
             m.strategy=0
             m.limits[x0_dict.keys()] = pars_lims
             for i in fix_pars:
-                m.fixed[pars_name_dict[i]] = True
+                if i != 2 or i != 1:
+                    m.fixed[pars_name_dict[i]] = True
             m.migrad()
             theta_max = m.values[x0_dict.keys()]
             #print(theta_max)
@@ -504,7 +447,6 @@ class dm_event(object):
         """
 
 
-
     def import_events(self, filename):
         df = pd.read_csv(filename, header=None)
         self.events = df[0] 
@@ -513,6 +455,65 @@ class dm_event(object):
         self.mass_det = self.npix*3.507e-9 #kg
         print("{} g*days".format(self.mass_det*self.texp*1000))
 
+
+    """
+    def import_diffusion_model(self, filename):
+        pkl_dict = pickle.load(open(filename,"rb"))
+        self.diffusion = True
+        self.fs = pkl_dict["fs"]
+        self.ne = pkl_dict["ne"].astype(int)
+        self.Csig_sim = pkl_dict["Csig"]
+        self.xs_sim = pkl_dict["xs"]
+        print(self.ne)
+        #self.Eeh = pkl_dict["Eeh"]
+        self.normalization_signal_diffusion()
+    
+    def normalization_signal_diffusion(self):
+        #Calculates the normalization of the signal PDF.
+
+        self.Csig = self.Csig_sim*self.cross_section
+        print(self.Csig, self.Csig_sim)
+        self.dRdne = np.array(self.fs)*self.Csig
+        self.s = self.t_exp*self.mass_det*self.Csig#*self.cross_section
+        print(self.s)
+        #plt.plot(self.ne,self.dRdne,'o')
+        #plt.yscale("log")
+        #plt.show()
+        self.n_s_det = np.random.poisson(self.s)
+    """
+    def import_diffusion_model(self, filename):
+        pkl_dict = pickle.load(open(filename,"rb"))
+        self.diffusion = True
+        self.fs, self.ne = [],[]
+        print(pkl_dict)
+        #for key in pkl_dict:
+        #    self.fs.append( pkl_dict[key])
+        #    self.ne.append(int(key))
+        #self.fs = np.array(self.fs)
+        self.fs = pkl_dict["fs"]
+        self.ne = pkl_dict["ne"].astype(int)
+ 
+        self.Nev = pkl_dict["Nev"]
+        #self.Csig_sim = np.sum(self.fs)
+        print(self.ne)
+        #self.Eeh = pkl_dict["Eeh"]
+        self.normalization_signal_diffusion()
+ 
+    def normalization_signal_diffusion(self):
+        """ Calculates the normalization of the signal PDF.
+        """
+        self.xs_0 = self.cross_section
+        self.cross_section = 1e-37
+        self.normalization_signal()
+        self.cross_section = self.xs_0
+        self.xs_ref = self.Nev/self.C_sig
+        signal_strength = self.cross_section/self.xs_ref
+        self.dRdne = np.array(self.fs)*signal_strength
+        self.s = self.t_exp*self.mass_det*self.C_sig*1e-37
+        #plt.plot(self.ne,self.dRdne,'o')
+        #plt.yscale("log")
+        #plt.show()
+        self.n_s_det = np.random.poisson(self.s)
 
 
     def verbose(self):
