@@ -235,6 +235,8 @@ class dm_event(object):
         nbins = int((self.xmax-self.xmin)/bin_size)
 
         ### Creates and histogram to get the bin content
+
+        self.events = self.events[(self.events>=self.xmin) & (self.events<=self.xmax)]
         hist = np.histogram(self.events, nbins)
         n_data, dx = hist[0],hist[1]
 
@@ -458,39 +460,26 @@ class dm_event(object):
         print("{} g*days".format(self.mass_det*self.texp*1000))
 
 
-    """
-    def import_diffusion_model(self, filename):
-        pkl_dict = pickle.load(open(filename,"rb"))
-        self.diffusion = True
-        self.fs = pkl_dict["fs"]
-        self.ne = pkl_dict["ne"].astype(int)
-        self.Csig_sim = pkl_dict["Csig"]
-        self.xs_sim = pkl_dict["xs"]
-        print(self.ne)
-        #self.Eeh = pkl_dict["Eeh"]
-        self.normalization_signal_diffusion()
-    
-    def normalization_signal_diffusion(self):
-        #Calculates the normalization of the signal PDF.
+    def infer_diffusion_model_file(self, diffusion_dir, diffusion_files):
 
-        self.Csig = self.Csig_sim*self.cross_section
-        print(self.Csig, self.Csig_sim)
-        self.dRdne = np.array(self.fs)*self.Csig
-        self.s = self.t_exp*self.mass_det*self.Csig#*self.cross_section
-        print(self.s)
-        #plt.plot(self.ne,self.dRdne,'o')
-        #plt.yscale("log")
-        #plt.show()
-        self.n_s_det = np.random.poisson(self.s)
-    """
-
-
-    def infer_diffusion_model_file(self, diffusion_dir):
         df_diffusion = pd.read_csv(diffusion_dir + "dR_list_MeV.csv")
-        filename = df_diffusion[df_diffusion["mx"]==self.mass_dm]["name"].values[0]
+        print(self.mass_dm, df_diffusion["mx"])
+        filename = diffusion_files + df_diffusion[df_diffusion["mx"]==self.mass_dm]["name"].values[0].split("/")[-1] + ".pkl"
         print(filename)
-        self.cross_section_diff = df_diffusion[df_diffusion["mx"]==self.mass_dm]["xs"].values[0]
-        print(self.cross_section_diff)
+        self.cross_section_ref = df_diffusion[df_diffusion["mx"]==self.mass_dm]["xs"].values[0]
+        print(self.cross_section_ref)
+
+
+        ### Calculates number of Reference expected events
+        self.xs_0 = self.cross_section
+        self.cross_section = self.cross_section_ref
+        self.normalization_signal()
+        self.Nref = self.s
+
+        ### Back to original cross section
+        self.cross_section = self.xs_0
+        self.normalization_signal()
+
         self.import_diffusion_model(filename)
 
 
@@ -506,27 +495,25 @@ class dm_event(object):
         self.fs = pkl_dict["fs"]
         self.ne = pkl_dict["ne"].astype(int)
  
-        self.Nev = pkl_dict["Nev"]
-        #self.Csig_sim = np.sum(self.fs)
+        ### Calculates the cross section simulated for te simulated number of events
+        self.Nsim = pkl_dict["Nev"]
+        self.cross_section_sim = self.cross_section_ref*self.Nsim*self.t_exp*self.mass_det/self.Nref
+        print(self.cross_section_ref,self.cross_section_sim)
         print(self.ne)
-        #self.Eeh = pkl_dict["Eeh"]
+
         self.normalization_signal_diffusion()
  
     def normalization_signal_diffusion(self):
         """ Calculates the normalization of the signal PDF.
         """
-        self.xs_0 = self.cross_section
-        self.cross_section = self.cross_section_diff
-        self.normalization_signal()
-        self.cross_section = self.xs_0
-        self.xs_ref = self.Nev/self.C_sig
-        signal_strength = self.cross_section/self.xs_ref
-        self.dRdne = np.array(self.fs)*signal_strength
-        self.s = self.t_exp*self.mass_det*self.C_sig*self.cross_section_diff
+
+        signal_strength = self.cross_section/self.cross_section_sim
+        self.s = self.t_exp*self.mass_det*signal_strength*self.Nsim
+        self.dRdne = np.array(self.fs)*self.s
         #plt.plot(self.ne,self.dRdne,'o')
         #plt.yscale("log")
         #plt.show()
-        self.n_s_det = np.random.poisson(self.s)
+        #self.n_s_det = np.random.poisson(self.s)
 
 
     def verbose(self):
