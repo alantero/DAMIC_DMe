@@ -13,6 +13,7 @@ import iminuit
 from memoization import cached , CachingAlgorithmFlag
 import pandas as pd
 import pickle
+import glob
 
 
 from WIMpy import DMUtils as DMU
@@ -47,6 +48,7 @@ class dm_event(object):
         self.xs_nosignal()
         self.normalization_signal()
         self.diffusion = False
+
 
     def xs_nosignal(self):
         original_xs = self.cross_section
@@ -481,6 +483,17 @@ class dm_event(object):
         #plt.show()
         self.n_s_det = np.random.poisson(self.s)
     """
+
+
+    def infer_diffusion_model_file(self, diffusion_dir):
+        df_diffusion = pd.read_csv(diffusion_dir + "dR_list_MeV.csv")
+        filename = df_diffusion[df_diffusion["mx"]==self.mass_dm]["name"].values[0]
+        print(filename)
+        self.cross_section_diff = df_diffusion[df_diffusion["mx"]==self.mass_dm]["xs"].values[0]
+        print(self.cross_section_diff)
+        self.import_diffusion_model(filename)
+
+
     def import_diffusion_model(self, filename):
         pkl_dict = pickle.load(open(filename,"rb"))
         self.diffusion = True
@@ -503,13 +516,13 @@ class dm_event(object):
         """ Calculates the normalization of the signal PDF.
         """
         self.xs_0 = self.cross_section
-        self.cross_section = 1e-37
+        self.cross_section = self.cross_section_diff
         self.normalization_signal()
         self.cross_section = self.xs_0
         self.xs_ref = self.Nev/self.C_sig
         signal_strength = self.cross_section/self.xs_ref
         self.dRdne = np.array(self.fs)*signal_strength
-        self.s = self.t_exp*self.mass_det*self.C_sig*1e-37
+        self.s = self.t_exp*self.mass_det*self.C_sig*self.cross_section_diff
         #plt.plot(self.ne,self.dRdne,'o')
         #plt.yscale("log")
         #plt.show()
