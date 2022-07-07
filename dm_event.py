@@ -21,7 +21,7 @@ from differential_rate_electronDM import *
 
 
 class dm_event(object):
-    def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si",rhoDM=0.3,Eeh=3.77,vpars=[232e5,220e5,544e5]):
+    def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si",rhoDM=0.3,Eeh=3.77,vpars=[250e5,238e5,544e5]):
         self.q, self.mass_dm, self.cross_section = q, mass_dm, cross_section
         self.mass_det, self.t_exp = mass_det, t_exp
         self.nx, self.ny, self.nccd = nx, ny, nccd
@@ -508,7 +508,7 @@ class dm_event(object):
         """
 
         signal_strength = self.cross_section/self.cross_section_sim
-        self.s = self.t_exp*self.mass_det*signal_strength*self.Nsim
+        self.s = signal_strength*self.Nsim*self.t_exp*self.mass_det
         self.dRdne = np.array(self.fs)*self.s
         #plt.plot(self.ne,self.dRdne,'o')
         #plt.yscale("log")

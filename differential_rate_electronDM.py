@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from scipy.special import erf
-from scipy.integrate import simpson
+#from scipy.integrate import simpson
 
 #import matplotlib.pyplot as plt
 import time
