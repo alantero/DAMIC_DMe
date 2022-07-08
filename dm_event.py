@@ -464,12 +464,15 @@ class dm_event(object):
 
 
     def import_events(self, filename):
-        df = pd.read_csv(filename, header=None)
-        self.events = df[0] 
-        self.npix = len(self.events)
-        self.texp=22583.2/86400 #days
-        self.mass_det = self.npix*3.507e-9 #kg
-        print("{} g*days".format(self.mass_det*self.texp*1000))
+        self.events, self.texp, self.npix, self.texp, self.mass_det = [],[],[],[],[]
+        for f in filename:
+            df = pd.read_csv(filename, header=None)
+            self.events.append( df[0] )
+            self.npix.append( len(self.events) )
+            self.texp.append( 22583.2/86400) #days
+            self.mass_det.append( self.npix*3.507e-9 ) #kg
+        self.events, self.texp, self.npix, self.texp, self.mass_det = np.array(self.events), np.array(self.texp), np.array(self.npix), np.array(self.texp), np.array(self.mass_det)
+            print("{} g*days".format(self.mass_det*self.texp*1000))
 
 
     def infer_diffusion_model_file(self, diffusion_dir, diffusion_files):
