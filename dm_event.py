@@ -23,15 +23,18 @@ from differential_rate_electronDM import *
 class dm_event(object):
     def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si",rhoDM=0.3,Eeh=3.77,vpars=[250e5,238e5,544e5]):
         self.q, self.mass_dm, self.cross_section = q, mass_dm, cross_section
-        self.mass_det, self.t_exp = mass_det, t_exp
-        self.nx, self.ny, self.nccd = nx, ny, nccd
-        self.nxbin, self.nybin = nxbin, nybin
-        self.mask_frac = 1-mask_frac
-        self.tread = tread/24
+
+        ### All the variables should be now arrays for each ccd
+        self.mass_det, self.t_exp = np.array(mass_det), np.array(t_exp)
+        self.nx, self.ny = np.array(nx), np.array(ny)
+        self.nxbin, self.nybin = np.array(nxbin), np.array(nybin)
+        self.mask_frac = 1-np.array(mask_frac)
+        self.tread = np.array(tread)/24
         #self.n_image = int(np.round(self.t_exp/self.tread))
-        self.n_image = n_image#self.mass_det/ccd_mass
+        self.nccd = nccd
+        self.n_image = np.array(n_image)#self.mass_det/ccd_mass
         self.pix_mass = self.nx/self.nxbin*self.ny/self.nybin*ccd_mass#*self.mass_det/ccd_mass
-        self.npix = int(np.round(self.mask_frac*self.nccd*self.nx/self.nxbin*self.ny/self.nybin*self.n_image))
+        self.npix = np.round(self.mask_frac*self.nx/self.nxbin*self.ny/self.nybin*self.n_image).astype(int)
         #self.npix = int(np.round(self.pix_mass*self.n_image))
         self.xmin, self.xmax = xmin, xmax
         self.vpars, self.rhoDM, self.Eeh = vpars, rhoDM, Eeh
@@ -40,9 +43,9 @@ class dm_event(object):
         self.dRdE_model = dRdne#getattr(DMU, self.dRdE_name)
         
         ### Signal Efficiency resolution
-        self.noise = noise
-        self.mu = 0
-        self.gain = 1
+        self.noise = np.array(noise)
+        self.mu = np.array( [0] * self.nccd )
+        self.gain = np.array([1] * self.nccd ) 
 
         self.normalization_signal()
         self.xs_nosignal()
@@ -98,7 +101,7 @@ class dm_event(object):
             self.s = self.C_sig*self.t_exp*self.mass_det
             #print("s",self.s)
             if not hasattr(self,"signal_simulated"):
-                self.n_s_det = np.random.poisson(self.s)
+                self.n_s_det = np.random.poisson(self.s, self.nccd)
                 self.signal_simulated = True
             self.fs = np.array(self.dRdne)/self.C_sig
 
@@ -116,8 +119,9 @@ class dm_event(object):
             self.events = self.signal_ev + self.bkg_ev
             self.nPeaks = int(np.max(self.events))
             ### Add readout noise
-            self.events = self.events + np.random.normal(mu0,noise, self.npix)
-            self.events = self.events.tolist()
+            for i in range(self.nccd):
+                self.events[i] = self.events[i] + np.random.normal(mu0[i],noise[i], self.npix[i])
+            self.events = self.events
             """
             plt.hist(self.events, bins=int((self.xmax-self.xmin)/0.1))
             plt.yscale("log")
@@ -128,25 +132,28 @@ class dm_event(object):
         else:
             self.simul_dm()
             self.events = self.signal_ev
-            self.events = np.array(self.events) + np.random.normal(0,self.noise, self.npix)
-            self.events = self.events.tolist()
+            for i in range(self.nccd):
+                self.events[i] = self.events[i] + np.random.normal(mu0[i],noise[i], self.npix[i])
+            self.events = self.events
             self.signal_generated = True
-            return self.signal_ev
+            return self.events
 
     def simul_dm(self):
-        nx = np.random.randint(0,self.npix,self.n_s_det)
-        self.signal_ev = np.zeros([self.npix])
-        dm_ev = np.random.choice(self.ne, self.n_s_det, p=self.fs)
-        self.signal_ev[nx] = dm_ev
-    
-    def simul_bkg(self, darkC):
-        #self.darkC = darkC
-        #self.lamb = darkC*self.tread*self.nxbin*self.nybin
-        self.lamb = darkC
-        #print("Lamb: ", self.lamb)
-        ### Events in Eee
-        self.bkg_ev = np.random.poisson(self.lamb, self.npix)
+        self.signal_ev = []
+        for i in range(self.nccd):
+            nx = np.random.randint(0,self.npix,self.n_s_det)
+            signal_ev_i = np.zeros([self.npix])
+            dm_ev = np.random.choice(self.ne, self.n_s_det[i], p=self.fs)
+            signal_ev_i[nx] = dm_ev
+            self.signal_ev.append(signal_ev_i)
+        self.signal_ev = np.array(self.signal_ev)
 
+    def simul_bkg(self, darkC):
+        self.lamb = darkC
+        self.bkg_ev = []
+        for i in range(self.nccd):
+            self.bkg_ev.append( np.random.poisson(self.lamb[i], self.npix[i]) )
+        self.bkg_ev = np.array(self.bkg_ev)
 
     def likelihood(self, **kwargs):
         """ Minimizes the log likelihood of signal+background model.
@@ -175,7 +182,7 @@ class dm_event(object):
             #f_str = []
             
             ### Adds the 0 electron to peak to DM interaction probability 
-            S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix
+            S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix_i
             ### If the number of signals electrons is less than background the number of peaks is extended
             if self.nPeaks > len(S):
                 S_extended = np.zeros([self.nPeaks])
@@ -204,10 +211,9 @@ class dm_event(object):
                 self.simul_bkg(dc)
                 self.events = self.bkg_ev
                 self.nPeaks = int(np.max(self.events))
-                self.events = self.events + np.random.normal(mu0,noise,self.npix)
-                self.events = self.events.tolist()
+                for i in range(self.nccd):
+                    self.events[i] = self.events[i] + np.random.normal(mu0[i],noise[i],self.npix[i])
             else:
-                print("Hola")
                 self.simul_ev(simulate)
                 self.nPeaks = int(np.max(self.events))
             ### Add readout noise
@@ -235,30 +241,32 @@ class dm_event(object):
         nbins = int((self.xmax-self.xmin)/bin_size)
 
         ### Creates and histogram to get the bin content
-
-        self.events = self.events[(self.events>=self.xmin) & (self.events<=self.xmax)]
-        hist = np.histogram(self.events, nbins)
-        n_data, dx = hist[0],hist[1]
+        n_data, dx = [], []
+        for i in range(self.nccd):
+            self.events[i] = self.events[(self.events[i]>=self.xmin) & (self.events[i]<=self.xmax)]
+            hist = np.histogram(self.events[i], nbins)
+            n_data.append(hist[0])
+            dx.append(hist[1])
 
         
-        def log_like(theta,n_data,dx):
+        def log_like(theta,data,x):
             ### Uses the bin center approximation for binning the likelihood
-            dx_m = (dx[:-1] + dx[1:])/2
-            n_theo = prob(theta,dx_m)*np.diff(dx)
-            n_theo = n_theo[n_data>0]
-            n_data = n_data[n_data>0]
+            dx_m = (x[:-1] + x[1:])/2
+            n_theo = prob(theta,dx_m)*np.diff(x)
+            n_theo = n_theo[data>0]
+            data = data[data>0]
             #lnL = theta[0] - np.sum(n_data*np.log(n_theo)) 
             #lnL = np.sum(n_theo) - np.sum(n_data*np.log(n_theo)) 
             #n_data = n_data.astype(int)
-            LL = n_data*np.log(n_theo)-n_theo+n_data-n_data*np.log(n_data)-0.5*np.log(2*np.pi*n_data)
+            LL = data*np.log(n_theo)-n_theo+data-data*np.log(data)-0.5*np.log(2*np.pi*data)
             lnL = -np.sum(LL)
             #lnL = -np.sum(n_data*np.log(n_theo)-n_theo-(n_data*np.log(n_data)+n_data+np.log(2*np.pi*n_data))) 
             #lnL = np.sum(n_theo) - np.sum(n_data*np.log(n_theo)) 
             #print(lnL)
             return lnL
 
-        pars_name = [r"$Norm$", r"$\mu_{0}$", r"$noise$", r"$\Omega$",r"$\lambda$", r"$\sigma_{DM-e}$"]
-        pars_name_dict = ["Norm", "mu", "noise", "gain","lamb", "sigma"]
+        pars_name = [r"$Norm$", r"$\mu_{0}$", r"$noise$", r"$\Omega$",r"$\lambda$"]#, r"$\sigma_{DM-e}$"]
+        pars_name_dict = ["Norm", "mu", "noise", "gain","lamb"]#, "sigma"]
         ### Minimizes the loglikelihood
         if len(fix_pars) != 0:
             ### Fix the given parameter numbers
@@ -269,40 +277,48 @@ class dm_event(object):
             pars_lims_nofix = np.array(pars_lims)[not_fix_pars]
             x0_nofix = x0[not_fix_pars]
 
-            def log_like_fix(theta, n_data, dx):
-                """ Function with fixed parameters
-                """
-                pa_[not_fix_pars] = theta
-                return log_like(pa_, n_data, dx)
-
-            ### Minimizes log-likelihood
-            #theta_max = minimize(log_like_fix, x0_nofix, bounds=pars_lims_nofix,method='Powell', args = (n_data,dx)).x
-            #print(theta_max)
-
-            #print("----------- Fit Result -----------")
             @cached(algorithm=CachingAlgorithmFlag.LFU)
-            def log_like_minuit(Norm,mu,noise,gain,lamb,sigma):
-                theta = [Norm,mu,noise,gain,lamb,sigma]
+            def log_like_minuit(theta, data, x, ccd_i=0):#(Norm,mu,noise,gain,lamb,sigma):
+                #theta = [Norm,mu,noise,gain,lamb,sigma]
+                Norm,mu,noise,gain,lamb,sigma = theta
                 ln_penalty = 0
                 if 2 in fix_pars: # Readout gaussian penalty
-                    ln_penalty += (x0[2]-noise)**2/np.diff(pars_lims[2])
+                    ln_penalty += (x0[2+int(len(pars_name)*ccd_i)]-noise)**2/np.diff(pars_lims[2+int(len(pars_name)*ccd_i)])
 
-                if 1 in fix_pars: # Readout gaussian penalty
-                    ln_penalty += (x0[1]-mu)**2/np.diff(pars_lims[1])
+                if 1 in fix_pars: # mu gaussian penalty
+                    ln_penalty += (x0[1+int(len(pars_name)*ccd_i)]-mu)**2/np.diff(pars_lims[1+int(len(pars_name)*ccd_i)])
 
-                return ln_penalty + log_like(theta, n_data, dx)
+                return ln_penalty + log_like(theta, data, x)
+
+            def log_like_amps(*p):
+                LL = 0
+                for ccd_i in range(self.nccd):
+                    p_i = p[int(ccd_i*len(pars_name)):int(len(pars_name)+ccd_i*len(pars_name))]
+                    ### DM cross section
+                    p_i.append(p[-1])
+                    self.npix_i = self.npix[ccd_i]
+                    LL += log_like_minuit(p_i, n_data[i], dx[i], ccd_i=ccd_i)
+                return LL
+
+            ### Minimizing likelihood
             x0_dict = {}
-            for i in range(len(x0)):
-                x0_dict[pars_name_dict[i]] = x0[i]
-
-            m = iminuit.Minuit(log_like_minuit,**x0_dict)
+            for ccd_i in range(self.nccd):
+                for i in range(len(x0)):
+                    x0_dict[pars_name_dict[i]+str(ccd_i)] = x0[i]
+            x0_dict["sigma"] = x0[-1]
+            #m = iminuit.Minuit(log_like_minuit,**x0_dict)
+            m = iminuit.Minuit(log_like_amps,**x0_dict)
             m.errors[x0_dict.keys()] = 1e-5
             m.errordef = m.LIKELIHOOD
             m.strategy=0
             m.limits[x0_dict.keys()] = pars_lims
-            for i in fix_pars:
-                if i != 2 or i != 1:
-                    m.fixed[pars_name_dict[i]] = True
+            for ccd_i in range(self.nccd):
+                for i in fix_pars:
+                    if i != 2 or i != 1:
+                        m.fixed[int(ccd_i*len(pars_name_dict)+pars_name_dict[i])] = True
+            ### Cross section
+            if len(x0)-1 in fix_pars:
+                m.fixed[len(x0)-1] = True
             m.migrad()
             theta_max = m.values[x0_dict.keys()]
             #print(theta_max)
@@ -316,8 +332,10 @@ class dm_event(object):
             theta_max = minimize(log_like, x0, bounds=pars_lims,method='Powell', args = (n_data,dx)).x
 
         fit_leg = []
-        for p, name in zip(theta_max, pars_name):
-            fit_leg.append(name+" = "+str(p))
+        for ccd_i in range(self.nccd):
+            for p, name in zip(theta_max[int(ccd_i*len(pars_name)):int(len(pars_name)+ccd_i*len(pars_name))], pars_name):
+                fit_leg.append(name+str(ccd_i)+" = "+str(p))
+        fit_leg.append(r"\sigma_DM = " +str(theta_max[-1]) )
         textstr = "\n".join(fit_leg)
         
         #print(textstr) 
@@ -326,48 +344,42 @@ class dm_event(object):
 
         if verbose:
             ### Plot fit and histogram
-            plt.clf()
-            fig, ax = plt.subplots()
-            nbins = int((self.xmax-self.xmin)/bin_size)
-            ax.hist(self.events, bins=nbins)#, density=True)
-            n_data_, dx_ = hist[0],hist[1]
+            for i in range(self.nccd):
+                plt.clf()
+                fig, ax = plt.subplots()
+                nbins = int((self.xmax-self.xmin)/bin_size)
+                ax.hist(self.events[i], bins=nbins)#, density=True)
+                n_data_, dx_ = hist[0],hist[1]
 
-            dx_m = (dx_[:-1] + dx_[1:])/2
-            dx_m = dx_[1:]#.flip(dx)))
-            n_theo_ = prob(theta_max,dx_m)*np.diff(dx_)
-            plt.plot(dx_m, n_theo_, color = "r", label = "Best Fit")
-            plt.yscale("log")
-            plt.ylim(0.1,None)
-            plt.legend(loc="best")
+                dx_m = (dx_[:-1] + dx_[1:])/2
+                dx_m = dx_[1:]#.flip(dx)))
+                n_theo_ = prob(theta_max,dx_m)*np.diff(dx_)
+                ax.plot(dx_m, n_theo_, color = "r", label = "Best Fit")
+                ax.set_yscale("log")
+                ax.set_ylim(0.1,None)
+                plt.legend(loc="best")
 
-            pars_name = [r"$Norm$", r"$\mu_{0}$", r"$noise$", r"$\Omega$",r"$\lambda$", r"$\sigma_{DM-e}$"]
-            fit_leg = []
-            for p, name in zip(theta_max, pars_name):
-                fit_leg.append(name+" = "+str(p))
-            
-            ### Legend text
-            textstr = "\n".join(fit_leg)
-            # these are matplotlib.patch.Patch properties
-            props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+                # these are matplotlib.patch.Patch properties
+                props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
 
-            # place a text box in upper left in axes coords
-            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=14,
-                    verticalalignment='top', bbox=props)
-
-            plt.show()
-            plt.clf()
+                # place a text box in upper left in axes coords
+                ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=14,
+                        verticalalignment='top', bbox=props)
+                plt.title("CCD {}".format(i))
+                plt.show()
+                plt.clf()
 
 
         ### Calculates the upper limit
         if upper_limit:
             ### Value of the likelihood at its maximum
-            lnL_max = -log_like(theta_max, n_data, dx)
+            lnL_max = -log_like_amps(theta_max)#, n_data, dx)
 
             def lnL_dLL(xs_range, n_data, dx):
                 """ Function to find the value where ln_max- ln_confidence = deltaLL
                 """
                 theta = np.array(theta_max[:-1]).tolist() + [xs_range]
-                return -log_like(theta, n_data, dx)-lnL_max+deltaLL
+                return -log_like_amps(theta)-lnL_max+deltaLL
 
             if verbose:
                 xs_range = np.linspace(pars_lims[-1][0], pars_lims[-1][1], 100)
