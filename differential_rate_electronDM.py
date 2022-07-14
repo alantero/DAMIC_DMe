@@ -1,7 +1,6 @@
 import os
 import numpy as np
 from scipy.special import erf
-#from scipy.integrate import simpson
 
 #import matplotlib.pyplot as plt
 import time
@@ -54,7 +53,7 @@ fcrys = {'Si': np.transpose(np.resize(np.loadtxt(dataDir+'/Si_f2.txt',skiprows=1
 #materials = {'Si': [2*28.0855*amu2kg, 2.0, 1.2, 3.8,wk/4*fcrys['Si']], \
 #             'Ge': [2*72.64*amu2kg, 1.8, 0.7, 2.8,wk/4*fcrys['Ge']]}
 
-materials = {'Si': [2*28.0855*amu2kg, 2.0, 1.11, 3.6, wk/4*fcrys['Si']], \
+materials = {'Si': [2*28.0855*amu2kg, 2.0, 1.11, 3.77, wk/4*fcrys['Si']], \
              'Ge': [2*72.64*amu2kg, 1.8, 0.7, 2.8,wk/4*fcrys['Ge']]}
 
 
@@ -106,14 +105,14 @@ def eta2(vmin,vE,v0,vesc):
     aesc = vesc/v0
     K = v0**3*np.pi*( np.sqrt(np.pi)*erf(aesc) -2*aesc*np.exp(-(aesc)**2) )
     A = v0**2*np.pi/(2*vE*K)
-    diff = erf((vmin+vE)/v0) - erf((vmin-vE)/v0)  
+    diff = erf(aesc) - erf((vmin-vE)/v0)  
     return A*(-2*np.exp(-aesc**2)*(vesc-vmin+vE)+np.sqrt(np.pi)*v0*diff)
 
 
 def calcEta(vmin, vE, v0, vesc):
     if hasattr(vmin, "__len__"):
         eta = np.zeros_like(vmin)
-        eta[vmin <= vesc-vE] = eta1(vmin[vmin < vesc-vE], vE,v0,vesc)
+        eta[vmin <= vesc-vE] = eta1(vmin[vmin <= vesc-vE], vE,v0,vesc)
         eta[(vesc-vE < vmin) & (vmin < vesc+vE)] = eta2(vmin[(vesc-vE < vmin) & (vmin < vesc+vE)], vE,v0,vesc)
         eta[vmin >= vesc+vE] = 0
         return eta
@@ -124,39 +123,6 @@ def calcEta(vmin, vE, v0, vesc):
             return eta2(vmin, vE,v0,vesc)
         elif vmin >= vesc+vE:
             return 0
-
-"""
-def speed_dist(vmin,vE,v0,vesc):
-    aesc = vesc/v0
-    K = erf(aesc) - (2/np.sqrt(np.pi)*aesc*np.exp(-aesc**2))
-    cosmax = (vesc**2-vmin**2-vE**2)/(2*vmin*vE)
-    cmax = np.minimum(1, cosmax)
-
-    f = vmin/(np.sqrt(np.pi)*v0*vE*K)*( np.exp(-(vmin-vE)**2/v0**2) - np.exp(-(vmin**2+vE+2*vmin*vE*cmax)/v0**2) )
-
-    if hasattr(vmin, "__len__"):
-        f[vmin>vE+vesc] = 0
-    else:
-        if u>vE+vEsc: f=0
-
-    return f/vmin
-
-def calcEta(vmin, vE, v0, vesc):
-    vmax = vE+vesc
-    vmin_matrix = []
-    for vm in vmin:
-        vmin_matrix.append(np.geomspace(vm,vmax,100).tolist())
-
-    vmin_matrix = np.array(vmin_matrix)
-
-    if hasattr(vmin, "__len__"):
-        eta = speed_dist(vmin_matrix, vE,v0,vesc)
-        return simpson(eta,vmin_matrix)
-    else:
-        eta = speed_dist(vmin_matrix, vE,v0,vesc)
-        if u>vE+vEsc: return simpson(eta,vmin_matrix).astype(float)
-"""
-
 
 
 def dRdE(material, mX, Ee, FDMn, halo, params):
