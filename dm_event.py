@@ -78,9 +78,9 @@ class dm_event(object):
 
         if hasattr(self, "lowest_cross_section") and self.cross_section <= self.lowest_cross_section:
             self.dRdne = np.array([0]) 
-            self.s = 0
+            self.s = np.zeros( [self.nccd] )
             self.C_sig = 0
-            self.n_s_det = 0
+            self.n_s_det = np.zeros( [self.nccd] )
             self.fs = np.array([0])
         else:
             while True:
@@ -169,7 +169,7 @@ class dm_event(object):
 
         self.cross_section_original = self.cross_section
 
-        def prob(p,x):
+        def prob(p,x,ccd_i=0):
             Npix,mu,noise,gain,dc,xs = p[0],p[1],p[2],p[3],p[4],p[5]
             #print(Npix,mu,noise,gain,dc,xs)
             self.cross_section = 10**xs
@@ -182,7 +182,7 @@ class dm_event(object):
             #f_str = []
             
             ### Adds the 0 electron to peak to DM interaction probability 
-            S = np.array([self.npix-self.s] + (self.fs*self.s).tolist())/self.npix_i
+            S = np.array([self.npix[ccd_i]-self.s[ccd_i]] + (self.fs*self.s[ccd_i]).tolist())/self.npix[ccd_i]
             ### If the number of signals electrons is less than background the number of peaks is extended
             if self.nPeaks > len(S):
                 S_extended = np.zeros([self.nPeaks])
@@ -210,7 +210,9 @@ class dm_event(object):
             if bkg_only:
                 self.simul_bkg(dc)
                 self.events = self.bkg_ev
-                self.nPeaks = int(np.max(self.events))
+                for ccd_i in range(self.nccd):
+                    nPeaks.append(int(np.round(np.max(self.events[ccd_i]))))
+                self.nPeaks = np.max(nPeaks)
                 for i in range(self.nccd):
                     self.events[i] = self.events[i] + np.random.normal(mu0[i],noise[i],self.npix[i])
             else:
@@ -220,7 +222,10 @@ class dm_event(object):
         if upper_limit and not simulate:
             cf, _ = upper_limit
             deltaLL = chi2.ppf(cf,df=1)/2
-            self.nPeaks = int(np.round(np.max(self.events)))
+            nPeaks = []
+            for ccd_i in range(self.nccd):
+                nPeaks.append(int(np.round(np.max(self.events[ccd_i]))))
+            self.nPeaks = np.max(nPeaks)
             if hasattr(self,"events"):
                 pass
         elif simulate and not upper_limit:
@@ -243,16 +248,18 @@ class dm_event(object):
         ### Creates and histogram to get the bin content
         n_data, dx = [], []
         for i in range(self.nccd):
-            self.events[i] = self.events[(self.events[i]>=self.xmin) & (self.events[i]<=self.xmax)]
+            ev = self.events[i]
+            #self.events[i] = ev[(ev>=self.xmin) & (ev<=self.xmax)]
+            self.events[i] = np.ma.masked_array(ev, mask=(ev<self.xmin) & (ev>self.xmax)).compressed()
+            self.npix[i] = len(self.events[i])
             hist = np.histogram(self.events[i], nbins)
             n_data.append(hist[0])
             dx.append(hist[1])
 
-        
-        def log_like(theta,data,x):
+        def log_like(theta,data,x,ccd_i=0):
             ### Uses the bin center approximation for binning the likelihood
-            dx_m = (x[:-1] + x[1:])/2
-            n_theo = prob(theta,dx_m)*np.diff(x)
+            dx_m = np.array(x[:-1] + x[1:])/2
+            n_theo = prob(theta,dx_m,ccd_i=0)*np.diff(x)
             n_theo = n_theo[data>0]
             data = data[data>0]
             #lnL = theta[0] - np.sum(n_data*np.log(n_theo)) 
@@ -268,8 +275,8 @@ class dm_event(object):
         pars_name = [r"$Norm$", r"$\mu_{0}$", r"$noise$", r"$\Omega$",r"$\lambda$"]#, r"$\sigma_{DM-e}$"]
         pars_name_dict = ["Norm", "mu", "noise", "gain","lamb"]#, "sigma"]
         ### Minimizes the loglikelihood
-        if len(fix_pars) != 0:
-            ### Fix the given parameter numbers
+        ### Fix the given parameter numbers
+        if len(fix_pars) > 0:
             pa_ = np.zeros_like(x0)+np.inf
             x0 = np.array(x0)
             pa_[fix_pars] = x0[fix_pars]
@@ -277,8 +284,8 @@ class dm_event(object):
             pars_lims_nofix = np.array(pars_lims)[not_fix_pars]
             x0_nofix = x0[not_fix_pars]
 
-            @cached(algorithm=CachingAlgorithmFlag.LFU)
-            def log_like_minuit(theta, data, x, ccd_i=0):#(Norm,mu,noise,gain,lamb,sigma):
+        @cached(algorithm=CachingAlgorithmFlag.LFU)
+        def log_like_minuit(theta, data, x, ccd_i=0):#(Norm,mu,noise,gain,lamb,sigma):
                 #theta = [Norm,mu,noise,gain,lamb,sigma]
                 Norm,mu,noise,gain,lamb,sigma = theta
                 ln_penalty = 0
@@ -288,48 +295,50 @@ class dm_event(object):
                 if 1 in fix_pars: # mu gaussian penalty
                     ln_penalty += (x0[1+int(len(pars_name)*ccd_i)]-mu)**2/np.diff(pars_lims[1+int(len(pars_name)*ccd_i)])
 
-                return ln_penalty + log_like(theta, data, x)
+                return ln_penalty + log_like(theta, data, x, ccd_i=ccd_i)
 
-            def log_like_amps(*p):
+        def log_like_amps(*p):
                 LL = 0
+                #p = list(p.values())
                 for ccd_i in range(self.nccd):
-                    p_i = p[int(ccd_i*len(pars_name)):int(len(pars_name)+ccd_i*len(pars_name))]
+                    p_i = p[0][int(ccd_i*len(pars_name)):int(len(pars_name)+ccd_i*len(pars_name))]
                     ### DM cross section
-                    p_i.append(p[-1])
+                    if type(p_i) is not list:
+                        p_i = p_i.tolist() + [p[0][-1].tolist()]
+                    else:
+                        p_i = p_i + [p[0][-1]]
                     self.npix_i = self.npix[ccd_i]
-                    LL += log_like_minuit(p_i, n_data[i], dx[i], ccd_i=ccd_i)
+                    LL += log_like_minuit(p_i, n_data[ccd_i], dx[ccd_i], ccd_i=ccd_i)
+                    del p_i
                 return LL
 
-            ### Minimizing likelihood
-            x0_dict = {}
-            for ccd_i in range(self.nccd):
-                for i in range(len(x0)):
-                    x0_dict[pars_name_dict[i]+str(ccd_i)] = x0[i]
-            x0_dict["sigma"] = x0[-1]
-            #m = iminuit.Minuit(log_like_minuit,**x0_dict)
-            m = iminuit.Minuit(log_like_amps,**x0_dict)
-            m.errors[x0_dict.keys()] = 1e-5
-            m.errordef = m.LIKELIHOOD
-            m.strategy=0
-            m.limits[x0_dict.keys()] = pars_lims
-            for ccd_i in range(self.nccd):
-                for i in fix_pars:
-                    if i != 2 or i != 1:
-                        m.fixed[int(ccd_i*len(pars_name_dict)+pars_name_dict[i])] = True
-            ### Cross section
-            if len(x0)-1 in fix_pars:
-                m.fixed[len(x0)-1] = True
-            m.migrad()
-            theta_max = m.values[x0_dict.keys()]
-            #print(theta_max)
-            #if verbose:
-            #    m.draw_contour("lamb","sigma")
-            ### Returns fitted+fixed parameters
-            #pa_[not_fix_pars] = theta_max
-            #theta_max = pa_
-        else:
-            ### Not fixed parameters
-            theta_max = minimize(log_like, x0, bounds=pars_lims,method='Powell', args = (n_data,dx)).x
+        ### Minimizing likelihood
+        x0_dict = {}
+        for ccd_i in range(self.nccd):
+            for i in range(len(pars_name_dict)):
+                x0_dict[pars_name_dict[i]+str(ccd_i)] = x0[i]
+        x0_dict["sigma"] = x0[-1]
+        #m = iminuit.Minuit(log_like_minuit,**x0_dict)
+        m = iminuit.Minuit(log_like_amps,x0)#_dict)
+        #m.errors[x0_dict.keys()] = 1e-5
+        m.errordef = m.LIKELIHOOD
+        m.strategy=0
+        for i in range(len(x0)):
+            m.limits[i] = pars_lims[i]
+            if i in fix_pars:
+                if int(i-ccd_i*len(pars_name_dict)) != 1 or int(i-ccd_i*len(pars_name_dict)):
+                    m.fixed[i] = True
+        ### Cross section
+        if len(x0)-1 in fix_pars:
+            m.fixed[len(x0)-1] = True
+        m.migrad()
+        theta_max = np.array([m.values[i] for i in range(len(x0))])#[x0_dict.keys()]
+        self.theta_max = theta_max
+        #if verbose:
+        #    m.draw_contour("lamb","sigma")
+        ### Returns fitted+fixed parameters
+        #pa_[not_fix_pars] = theta_max
+        #theta_max = pa_
 
         fit_leg = []
         for ccd_i in range(self.nccd):
@@ -465,14 +474,15 @@ class dm_event(object):
 
     def import_events(self, filename):
         self.events, self.texp, self.npix, self.texp, self.mass_det = [],[],[],[],[]
+        self.nccd = len(filename)
         for f in filename:
-            df = pd.read_csv(filename, header=None)
+            df = pd.read_csv(f, header=None)
             self.events.append( df[0] )
-            self.npix.append( len(self.events) )
+            self.npix.append( len(df[0]) )
             self.texp.append( 22583.2/86400) #days
-            self.mass_det.append( self.npix*3.507e-9 ) #kg
+            self.mass_det.append( len(df[0])*3.507e-9 ) #kg
         self.events, self.texp, self.npix, self.texp, self.mass_det = np.array(self.events), np.array(self.texp), np.array(self.npix), np.array(self.texp), np.array(self.mass_det)
-            print("{} g*days".format(self.mass_det*self.texp*1000))
+        print("{} g*days".format(self.mass_det*self.texp*1000))
 
 
     def infer_diffusion_model_file(self, diffusion_dir, diffusion_files):
@@ -524,7 +534,7 @@ class dm_event(object):
 
         signal_strength = self.cross_section/self.cross_section_sim
         self.s = signal_strength*self.Nsim*self.t_exp*self.mass_det
-        self.dRdne = np.array(self.fs)*self.s
+        #self.dRdne = np.array(self.fs)*self.s
         #plt.plot(self.ne,self.dRdne,'o')
         #plt.yscale("log")
         #plt.show()
@@ -536,7 +546,7 @@ class dm_event(object):
         print("Exposure [g*days]: ", self.mass_det*1e3*self.t_exp)
         print("Number of Total Pixels: ", self.npix)
         print("Number of Signal events: ", self.n_s_det)
-        if hasattr(self, "theta"): print("Likelihood parameters: ", self.theta_max)
+        if hasattr(self, "theta_max"): print("Likelihood parameters: ", self.theta_max)
         if hasattr(self, "cross_section_dLL"): print("Upper Limit Cross Section: ", self.cross_section_dLL)
         if hasattr(self, "theta_confidence"): print("Theta Confidence intervals: ", self.confidence)
 
