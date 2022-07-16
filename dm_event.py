@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import ROOT as r
 from scipy.stats import norm
 from scipy.stats import poisson
+from scipy import stats
 from scipy.optimize import minimize
 from scipy.optimize import bisect 
 from scipy.optimize import brentq
@@ -21,7 +22,7 @@ from differential_rate_electronDM import *
 
 
 class dm_event(object):
-    def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si",rhoDM=0.3,Eeh=3.77,vpars=[250e5,238e5,544e5]):
+    def __init__(self, mass_dm, cross_section, q, mass_det, t_exp, noise, nx = 4000, ny= 1000, nccd= 2, tread=2, ccd_mass = 0.02,xmin=-2,xmax=5,nxbin=1,nybin=1,n_image=38,mask_frac=0,dRdE_name="Si",rhoDM=0.3e9,Eeh=3.77,vpars=[232e5,220e5,544e5]):
         self.q, self.mass_dm, self.cross_section = q, mass_dm, cross_section
 
         ### All the variables should be now arrays for each ccd
@@ -154,6 +155,26 @@ class dm_event(object):
         for i in range(self.nccd):
             self.bkg_ev.append( np.random.poisson(self.lamb[i], self.npix[i]) )
         self.bkg_ev = np.array(self.bkg_ev)
+
+
+    def poisson_upper_limit(self, lamb, cf=0.9):
+        self.cross_section = 1
+        self.normalization_signal()
+        if self.diffusion:
+           self.normalization_signal_diffusion() 
+        else:
+           self.normalization_signal()
+        expected_dm_events = self.fs*self.s[0]
+        expected_dc_events = stats.poisson.pmf(self.ne,mu=lamb)*self.npix[0]
+
+        def s_up(n):
+            return 0.5*stats.chi2.ppf(cf,df=2*(n+1))
+
+        UL_expected_dc_events = s_up(expected_dc_events)
+
+        return np.min(UL_expected_dc_events/expected_dm_events)
+
+
 
     def likelihood(self, **kwargs):
         """ Minimizes the log likelihood of signal+background model.
@@ -477,7 +498,7 @@ class dm_event(object):
         self.nccd = len(filename)
         for f in filename:
             df = pd.read_csv(f, header=None)
-            self.events.append( df[0] )
+            self.events.append( df[0][(df[0]>=self.xmin) & (df[0]<=self.xmax) ] )
             self.npix.append( len(df[0]) )
             self.texp.append( 22583.2/86400) #days
             self.mass_det.append( len(df[0])*3.507e-9 ) #kg
@@ -532,7 +553,7 @@ class dm_event(object):
         """ Calculates the normalization of the signal PDF.
         """
 
-        signal_strength = self.cross_section/self.cross_section_sim
+        signal_strength = self.cross_section/self.cross_section_ref
         self.s = signal_strength*self.Nsim*self.t_exp*self.mass_det
         #self.dRdne = np.array(self.fs)*self.s
         #plt.plot(self.ne,self.dRdne,'o')

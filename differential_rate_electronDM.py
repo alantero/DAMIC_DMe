@@ -15,17 +15,16 @@ set directories
 dataDir = os.getcwd()
 FigDir = os.getcwd() + '/figs'
 
-rho_X = 0.4e9 # eV/cm^3
+#rho_X = 0.3e9 # eV/cm^3
 #v0 = 230e5 # cm/s
 #vE = 240e5
 #vesc = 600e5
 
-"""
-rho_X = 0.3e9 # eV/cm^3
-v0 = 220e5 # cm/s
-vE = 232e5
-vesc = 544e5
-"""
+
+#rho_X = 0.3e9 # eV/cm^3
+#v0 = 220e5 # cm/s
+#vE = 232e5
+#vesc = 544e5
 
 
 
@@ -125,7 +124,7 @@ def calcEta(vmin, vE, v0, vesc):
             return 0
 
 
-def dRdE(material, mX, Ee, FDMn, halo, params):
+def dRdE(material, mX, Ee, FDMn, halo, params, rho_X=0.3e9):
     """
     differential scattering rate for sigma_e = 1 cm^2
     at a fixed electron energy Ee
@@ -203,7 +202,7 @@ def dRdE_slow(material, mX, Ee, FDMn, halo, params):
         return prefactor*np.sum(array_, axis=0) # [(kg-year)^-1]
 
 
-def dRdne(sigmae, mX, ne, FDMn, halo, params,rhoDM=rho_X,Ebin=materials["Si"][3],material = "Si", slow=False):
+def dRdne(sigmae, mX, ne, FDMn, halo, params,rhoDM=0.3e9,Ebin=materials["Si"][3], material = "Si", slow=False):
     """
     calculates rate for sigmae = 1 cm^2 in the ne bin,
     assuming fiducial values for binsize
@@ -238,7 +237,7 @@ def dRdne(sigmae, mX, ne, FDMn, halo, params,rhoDM=rho_X,Ebin=materials["Si"][3]
             for i in range(tmpEbin):
                 ## add up in bins of [1.2,4.9],[5,8.7],...
                 #print(ne-1, Ebin, dE, i, materials[material][2])
-                tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+materials[material][2], FDMn, halo, params)
+                tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+materials[material][2], FDMn, halo, params, rho_X=rhoDM)
                 #tmpdRdE[i] = dRdE(material, mX, (ne-1)*Ebin+dE*i+1.11, FDMn, halo, params)
             dRdne = np.sum(tmpdRdE, axis = 0)
             #print("Time Fast: ", (time.time() - start_time)/60, ' min')
